@@ -1,0 +1,116 @@
+name: Configure MikroTik
+
+# This workflow is designed to run LOCALLY via act only.
+# It will refuse to execute when running in real GitHub Actions.
+#
+# Usage:
+#   make mikrotik
+#
+# Required secrets (write to secrets/ before running with act):
+#   MIKROTIK_SSH_KEY   — SSH private key (contents of the key file)
+#   MIKROTIK_HOST      — Router IP or hostname (e.g. 192.168.88.1)
+#   MIKROTIK_USER      — SSH username (typically admin)
+#   WG_GATEWAY_PUBLIC_KEY — WireGuard public key for the gateway peer
+#
+# Required vars (set as GitHub Actions variables or env before running):
+#   MIKROTIK_WG_PEER_IP — WireGuard IP for MikroTik (e.g. 10.10.0.2/32)
+#   WG_GATEWAY_HOST     — Public IP/hostname of vm-gateway
+#   WG_PORT             — WireGuard listen port (default: 51820)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  configure:
+    name: Configure MikroTik router
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check local-only guard
+        # Refuse to run in real GitHub Actions. The ACT env var is set by act.
+        run: |
+          if [ "${GITHUB_ACTIONS:-false}" = "true" ] && [ -z "${ACT:-}" ]; then
+            echo "ERROR: This workflow is for local use via act only."
+            echo "       It modifies your physical router and must not run in GitHub Actions."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write SSH key
+        env:
+          VALUE: ${{ secrets.MIKROTIK_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VALUE" > ~/.ssh/mikrotik_id
+          chmod 600 ~/.ssh/mikrotik_id
+
+      - name: Configure WireGuard on MikroTik
+        env:
+          MIKROTIK_HOST:      ${{ secrets.MIKROTIK_HOST }}
+          MIKROTIK_USER:      ${{ secrets.MIKROTIK_USER }}
+          WG_GATEWAY_PUBKEY:  ${{ secrets.WG_GATEWAY_PUBLIC_KEY }}
+          WG_GATEWAY_HOST:    ${{ vars.WG_GATEWAY_HOST }}
+          WG_PORT:            ${{ vars.WG_PORT || '51820' }}
+          PEER_IP:            ${{ vars.MIKROTIK_WG_PEER_IP || '10.10.0.2/32' }}
+        run: |
+          ssh -i ~/.ssh/mikrotik_id \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "${MIKROTIK_USER}@${MIKROTIK_HOST}" \
+          "
+          # Create WireGuard interface if it doesn't exist
+          /interface wireguard add name=wg-homelab listen-port=${WG_PORT} || true
+
+          # Set the peer (gateway VM) — use :set-comment trick to make it idempotent
+          /interface wireguard peers
+          add interface=wg-homelab \
+              public-key=\"${WG_GATEWAY_PUBKEY}\" \
+              endpoint-address=${WG_GATEWAY_HOST} \
+              endpoint-port=${WG_PORT} \
+              allowed-address=0.0.0.0/0 \
+              comment=vm-gateway || \
+          set [find comment=vm-gateway] \
+              public-key=\"${WG_GATEWAY_PUBKEY}\" \
+              endpoint-address=${WG_GATEWAY_HOST} \
+              endpoint-port=${WG_PORT}
+
+          # Assign the WireGuard overlay IP to the interface
+          /ip address
+          add address=${PEER_IP} interface=wg-homelab comment=wg-homelab || \
+          set [find comment=wg-homelab] address=${PEER_IP}
+          "
+
+      - name: Configure DNS static entries on MikroTik
+        env:
+          MIKROTIK_HOST: ${{ secrets.MIKROTIK_HOST }}
+          MIKROTIK_USER: ${{ secrets.MIKROTIK_USER }}
+        run: |
+          # Build a list of RouterOS /ip dns static add commands from config/dns/local_dns.txt.
+          # Format of source file: <ip>  <hostname>  (comments and blanks are skipped)
+          commands=""
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "${line// }" ]] && continue
+            ip=$(echo "$line" | awk '{print $1}')
+            hostname=$(echo "$line" | awk '{print $2}')
+            [ -z "$ip" ] || [ -z "$hostname" ] && continue
+            commands+="/ip dns static add address=${ip} name=${hostname} comment=homelab-provisioned || "
+            commands+="/ip dns static set [find comment=homelab-provisioned name=${hostname}] address=${ip}\n"
+          done < config/dns/local_dns.txt
+
+          if [ -z "$commands" ]; then
+            echo "No DNS entries to configure (config/dns/local_dns.txt is empty or all comments)."
+            exit 0
+          fi
+
+          ssh -i ~/.ssh/mikrotik_id \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "${MIKROTIK_USER}@${MIKROTIK_HOST}" \
+              "$(printf '%b' "$commands")"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/mikrotik_id

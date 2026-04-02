@@ -1,0 +1,191 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action to run"
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event.inputs.action }}
+    runs-on: ubuntu-latest
+    # 'production' environment adds a manual approval gate for apply/destroy.
+    # Create it at: Settings → Environments → New environment → Add required reviewers.
+    environment: ${{ github.event.inputs.action != 'plan' && 'production' || '' }}
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Record job start time
+        id: job_start
+        run: echo "time=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Write all secrets to files ────────────────────────────────────────
+      # Secrets are passed via environment variables (not inline ${{ }})
+      # to avoid interpolation issues with multiline values and special characters.
+
+      - name: Write OCI API key
+        env:
+          VALUE: ${{ secrets.OCI_API_PRIVATE_KEY }}
+        run: |
+          mkdir -p ../secrets
+          printf '%s\n' "$VALUE" > ../secrets/oci_api_key.pem
+          chmod 600 ../secrets/oci_api_key.pem
+
+      - name: Write WireGuard gateway private key
+        env:
+          VALUE: ${{ secrets.WG_GATEWAY_PRIVATE_KEY }}
+        run: |
+          printf '%s\n' "$VALUE" > ../secrets/wireguard_gateway_private.key
+          chmod 600 ../secrets/wireguard_gateway_private.key
+
+      - name: Write WireGuard gateway public key
+        env:
+          VALUE: ${{ secrets.WG_GATEWAY_PUBLIC_KEY }}
+        run: printf '%s\n' "$VALUE" > ../secrets/wireguard_gateway_public.key
+
+      - name: Write WireGuard MikroTik public key
+        env:
+          VALUE: ${{ secrets.WG_MIKROTIK_PUBLIC_KEY }}
+        run: printf '%s\n' "$VALUE" > ../secrets/wireguard_mikrotik_public.key
+
+      - name: Write Grafana GitHub OAuth client ID
+        env:
+          VALUE: ${{ secrets.GRAFANA_GITHUB_CLIENT_ID }}
+        run: |
+          printf '%s\n' "$VALUE" > ../secrets/grafana_github_client_id
+          chmod 600 ../secrets/grafana_github_client_id
+
+      - name: Write Grafana GitHub OAuth client secret
+        env:
+          VALUE: ${{ secrets.GRAFANA_GITHUB_CLIENT_SECRET }}
+        run: |
+          printf '%s\n' "$VALUE" > ../secrets/grafana_github_client_secret
+          chmod 600 ../secrets/grafana_github_client_secret
+
+      - name: Write Grafana session signing key
+        env:
+          VALUE: ${{ secrets.GRAFANA_SECRET_KEY }}
+        run: |
+          printf '%s\n' "$VALUE" > ../secrets/grafana_secret_key
+          chmod 600 ../secrets/grafana_secret_key
+
+      - name: Write telemetry S3 credentials
+        env:
+          ACCESS_KEY: ${{ secrets.TELEMETRY_S3_ACCESS_KEY }}
+          SECRET_KEY: ${{ secrets.TELEMETRY_S3_SECRET_KEY }}
+        run: |
+          printf '%s\n' "$ACCESS_KEY" > ../secrets/telemetry_s3_access_key
+          printf '%s\n' "$SECRET_KEY" > ../secrets/telemetry_s3_secret_key
+          chmod 600 ../secrets/telemetry_s3_access_key ../secrets/telemetry_s3_secret_key
+
+      - name: Write Terraform state backend config
+        env:
+          TF_STATE_ENDPOINT:   ${{ secrets.TF_STATE_ENDPOINT }}
+          TF_STATE_ACCESS_KEY: ${{ secrets.TF_STATE_ACCESS_KEY }}
+          TF_STATE_SECRET_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+        run: |
+          cat > ../secrets/backend.hcl <<EOF
+          bucket                      = "terraform-state"
+          key                         = "homelab/terraform.tfstate"
+          region                      = "ap-sydney-1"
+          endpoint                    = "$TF_STATE_ENDPOINT"
+          access_key                  = "$TF_STATE_ACCESS_KEY"
+          secret_key                  = "$TF_STATE_SECRET_KEY"
+          skip_credentials_validation = true
+          skip_metadata_api_check     = true
+          skip_region_validation      = true
+          force_path_style            = true
+          EOF
+
+      - name: Write terraform.tfvars
+        env:
+          OCI_TENANCY_OCID:       ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID:          ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT:        ${{ secrets.OCI_FINGERPRINT }}
+          OCI_COMPARTMENT_OCID:   ${{ secrets.OCI_COMPARTMENT_OCID }}
+          SSH_PUBLIC_KEY:         ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_STATE_ENDPOINT:      ${{ secrets.TF_STATE_ENDPOINT }}
+        run: |
+          # Derive OCI namespace from the state endpoint URL:
+          #   https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
+          OCI_NAMESPACE=$(echo "$TF_STATE_ENDPOINT" | sed 's|https://||' | cut -d. -f1)
+          TELEMETRY_S3_ENDPOINT="https://${OCI_NAMESPACE}.compat.objectstorage.ap-sydney-1.oraclecloud.com"
+
+          cat > terraform.tfvars <<EOF
+          tenancy_ocid          = "$OCI_TENANCY_OCID"
+          user_ocid             = "$OCI_USER_OCID"
+          fingerprint           = "$OCI_FINGERPRINT"
+          private_key_path      = "../secrets/oci_api_key.pem"
+          compartment_ocid      = "$OCI_COMPARTMENT_OCID"
+          ssh_public_key        = "$SSH_PUBLIC_KEY"
+          telemetry_s3_endpoint = "$TELEMETRY_S3_ENDPOINT"
+          EOF
+
+      # ── Bootstrap state bucket (idempotent) ───────────────────────────────
+      # Creates the OCI Object Storage bucket if it doesn't exist.
+      # The AWS CLI is pre-installed on ubuntu-latest runners.
+
+      - name: Bootstrap state bucket
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+          TF_STATE_ENDPOINT:     ${{ secrets.TF_STATE_ENDPOINT }}
+        run: |
+          aws s3api create-bucket \
+            --bucket terraform-state \
+            --region ap-sydney-1 \
+            --endpoint-url "$TF_STATE_ENDPOINT" 2>&1 \
+            | grep -v "BucketAlreadyOwnedByYou" || true
+
+      # ── Terraform ─────────────────────────────────────────────────────────
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -backend-config=../secrets/backend.hcl
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -out=../tfplan.binary
+        # Always plan — output is visible in the Actions log.
+
+      - name: Terraform Apply
+        if: github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve ../tfplan.binary
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        run: terraform destroy -auto-approve
+
+      - name: Notify Discord
+        if: always()
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook-url:    ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status:         ${{ job.status }}
+          title:          "Deploy Infrastructure — terraform ${{ github.event.inputs.action }}"
+          job-start-time: ${{ steps.job_start.outputs.time }}
+          run-id:         ${{ github.run_id }}
+          run-number:     ${{ github.run_number }}
+          repo:           ${{ github.repository }}

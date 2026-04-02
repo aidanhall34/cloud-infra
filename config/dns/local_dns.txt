@@ -1,0 +1,13 @@
+# Blocky custom DNS records — mapped to customDNS.mapping in Blocky config
+# Format: <ip>  <hostname>
+# Lines starting with # are ignored.
+#
+# NOTE: Cloud VMs use dynamic private IPs (no fixed assignment).
+# Internal VM-to-VM routing uses OCI VCN DNS which is always available:
+#   vm-gateway   → vm-gateway.gateway.homelab.oraclevcn.com
+#   vm-telemetry → vm-telemetry.telemetry.homelab.oraclevcn.com
+#
+# Add entries here for stable names you want resolvable on your home network
+# (e.g. for devices with fixed IPs).
+# Example:
+# 192.168.1.1  router.home

@@ -1,0 +1,6 @@
+# Blocky allowlist — domains to always allow, one per line.
+# Lines starting with # are ignored.
+
+# Add domains here that are incorrectly blocked by the adlists above.
+# Example:
+# cdn.example.com

@@ -1,0 +1,90 @@
+name: Notify Discord
+description: >
+  Posts a job-completion embed to a Discord webhook.
+  Always call with `if: always()` so failures are reported too.
+
+inputs:
+  webhook-url:
+    description: Discord webhook URL (pass from secrets.DISCORD_WEBHOOK_URL)
+    required: true
+  status:
+    description: "Job status: success | failure | cancelled"
+    required: true
+  title:
+    description: Embed title shown in Discord (e.g. "Deploy Infrastructure — terraform plan")
+    required: true
+  job-start-time:
+    description: Unix epoch (seconds) recorded at the start of the job
+    required: true
+  run-id:
+    description: GitHub Actions run ID (github.run_id)
+    required: false
+    default: ""
+  run-number:
+    description: GitHub Actions run number (github.run_number)
+    required: false
+    default: ""
+  repo:
+    description: "Repository slug (github.repository, e.g. owner/repo)"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Send Discord notification
+      shell: bash
+      env:
+        DISCORD_WEBHOOK_URL: ${{ inputs.webhook-url }}
+        JOB_STATUS:          ${{ inputs.status }}
+        TITLE:               ${{ inputs.title }}
+        JOB_START_TIME:      ${{ inputs.job-start-time }}
+        RUN_ID:              ${{ inputs.run-id }}
+        RUN_NUMBER:          ${{ inputs.run-number }}
+        REPO:                ${{ inputs.repo }}
+      run: |
+        end_time=$(date -u +%s)
+        start_time="$JOB_START_TIME"
+        duration_secs=$(( end_time - start_time ))
+        duration="$(( duration_secs / 60 ))m $(( duration_secs % 60 ))s"
+
+        start_iso=$(date -u -d "@$start_time" +"%Y-%m-%d %H:%M:%S UTC")
+        end_iso=$(date -u -d "@$end_time"     +"%Y-%m-%d %H:%M:%S UTC")
+
+        case "$JOB_STATUS" in
+          success)   color=3066993  ;;   # green
+          failure)   color=15158332 ;;   # red
+          cancelled) color=9807270  ;;   # grey
+          *)         color=16776960 ;;   # yellow
+        esac
+
+        run_url=""
+        [ -n "$REPO" ] && [ -n "$RUN_ID" ] && \
+          run_url="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+
+        run_label="${RUN_NUMBER:-N/A}"
+
+        payload=$(cat <<JSON
+        {
+          "embeds": [{
+            "title": "$TITLE",
+            "url": "$run_url",
+            "color": $color,
+            "fields": [
+              { "name": "Status",   "value": "$JOB_STATUS", "inline": true },
+              { "name": "Run",      "value": "#$run_label",  "inline": true },
+              { "name": "Started",  "value": "$start_iso",   "inline": false },
+              { "name": "Finished", "value": "$end_iso",     "inline": false },
+              { "name": "Duration", "value": "$duration",    "inline": true }
+            ]
+          }]
+        }
+        JSON
+        )
+
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Content-Type: application/json" \
+          -d "$payload" \
+          "$DISCORD_WEBHOOK_URL")
+
+        echo "Discord notification HTTP $http_code"

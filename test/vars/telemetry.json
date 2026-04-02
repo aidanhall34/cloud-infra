@@ -1,0 +1,23 @@
+{
+  "otelcol_version":         "0.149.0",
+  "victoriametrics_version": "1.138.0",
+  "loki_version":            "3.7.1",
+  "tempo_version":           "2.10.3",
+  "grafana_github_client_id":     "test-client-id-ci",
+  "grafana_github_client_secret": "test-client-secret-ci",
+  "grafana_secret_key": "0000000000000000000000000000000000000000000000000000000000000000",
+  "grafana_github_org":  "",
+  "grafana_admin_user":  "testuser",
+  "grafana_oauth_auth_url":   "http://localhost:8090/login/oauth/authorize",
+  "grafana_oauth_token_url":  "http://localhost:8090/login/oauth/access_token",
+  "grafana_oauth_api_url":    "http://localhost:8090/api/user",
+  "telemetry_s3_endpoint":      "http://localhost:9000",
+  "telemetry_s3_endpoint_host": "localhost:9000",
+  "telemetry_s3_insecure":      "true",
+  "telemetry_s3_region":        "us-east-1",
+  "telemetry_s3_bucket_loki":     "loki-chunks",
+  "telemetry_s3_bucket_tempo":    "tempo-traces",
+  "telemetry_s3_bucket_vmbackup": "victoriametrics-backup",
+  "telemetry_s3_access_key": "minioadmin",
+  "telemetry_s3_secret_key": "minioadmin"
+}

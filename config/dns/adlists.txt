@@ -1,0 +1,15 @@
+# Blocky denylist URLs — one URL per line, lines starting with # are ignored.
+# Blocky fetches these at startup and refreshes them periodically.
+# Edit this file and re-apply Terraform to change blocklists on next instance creation.
+
+# StevenBlack unified hosts (ads + malware)
+https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+
+# AdGuard DNS filter
+https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+
+# Peter Lowe's ad and tracking server list
+https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext
+
+# Hagezi Multi Normal (balanced, low false positives)
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/multi.txt

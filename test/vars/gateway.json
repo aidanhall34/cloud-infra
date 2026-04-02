@@ -1,0 +1,13 @@
+{
+  "telemetry_hostname":            "127.0.0.1",
+  "wireguard_subnet":              "10.10.0.0/24",
+  "wireguard_port":                "51820",
+  "wireguard_private_key":         "WGtest/FakeKeyForCIOnlyNotAValidCurve25519Key=",
+  "wireguard_mikrotik_public_key": "",
+  "static_site_domain":            "",
+  "blocky_version":                "0.29.0",
+  "blocky_adlists":                "# StevenBlack unified hosts\nhttps://raw.githubusercontent.com/StevenBlack/hosts/master/hosts\n",
+  "blocky_allowlist":              "# empty for CI\n",
+  "blocky_local_dns":              "# empty for CI\n",
+  "otelcol_version":               "0.149.0"
+}
