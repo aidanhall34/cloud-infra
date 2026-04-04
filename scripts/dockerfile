@@ -1,0 +1,18 @@
+# Run type check
+FROM python:3.13-slim AS type-check
+WORKDIR /scripts
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY * .
+RUN uv sync --dev
+RUN uv run mypy *.py
+
+# Run unit tests
+FROM type-check AS test
+RUN uv run pytest .
+
+# Manage entrypoint
+FROM python:3.13-slim AS run
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /scripts
+COPY --from=test /scripts/ .
+ENTRYPOINT ["python3"]

@@ -1,9 +1,7 @@
 #cloud-config
 # vm-gateway: WireGuard VPN, Blocky DNS, Nginx static site, otelcol-contrib
 # OS: Ubuntu 24.04 Minimal (x86 / VM.Standard.E2.1.Micro)
-
-package_update: true
-package_upgrade: true
+# Merged with common.yaml.tpl which provides: package_update/upgrade, curl/wget/unzip, otelcol-contrib.
 
 packages:
   - wireguard
@@ -11,9 +9,6 @@ packages:
   - nginx
   - certbot
   - python3-certbot-nginx
-  - curl
-  - wget
-  - unzip
   - iptables
   - iptables-persistent
   - netfilter-persistent
@@ -126,7 +121,7 @@ write_files:
 
       {
         cat <<'HEADER'
-      upstream:
+      upstreams:
         groups:
           default:
             - 1.1.1.1
@@ -173,10 +168,11 @@ write_files:
         fi
 
         cat <<'FOOTER'
-
       ports:
-        dns: "0.0.0.0:53"
-        http: "0.0.0.0:4000"
+        dns:
+            - "0.0.0.0:53"
+        http:
+            - "0.0.0.0:4000"
 
       prometheus:
         enable: true
@@ -294,6 +290,9 @@ write_files:
             insecure: true
 
       service:
+        telemetry:
+          logs:
+            encoding: json
         extensions: [file_storage]
         pipelines:
           metrics:
@@ -342,11 +341,4 @@ runcmd:
   - certbot --nginx -d ${static_site_domain} --non-interactive --agree-tos -m admin@${static_site_domain} --redirect
   %{ endif ~}
 
-  # ── otelcol-contrib ───────────────────────────────────────────────────────
-  - wget -q -O /tmp/otelcol.deb "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${otelcol_version}/otelcol-contrib_${otelcol_version}_linux_amd64.deb"
-  - dpkg -i /tmp/otelcol.deb
-  - rm /tmp/otelcol.deb
-  - mkdir -p /var/lib/otelcol-contrib/filestore
-  - usermod -aG systemd-journal otelcol-contrib
-  - systemctl enable otelcol-contrib
-  - systemctl restart otelcol-contrib
+  # otelcol-contrib installed by common.yaml.tpl

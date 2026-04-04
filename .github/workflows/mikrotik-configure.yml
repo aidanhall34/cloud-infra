@@ -48,12 +48,12 @@ jobs:
 
       - name: Configure WireGuard on MikroTik
         env:
-          MIKROTIK_HOST:      ${{ secrets.MIKROTIK_HOST }}
-          MIKROTIK_USER:      ${{ secrets.MIKROTIK_USER }}
-          WG_GATEWAY_PUBKEY:  ${{ secrets.WG_GATEWAY_PUBLIC_KEY }}
-          WG_GATEWAY_HOST:    ${{ vars.WG_GATEWAY_HOST }}
-          WG_PORT:            ${{ vars.WG_PORT || '51820' }}
-          PEER_IP:            ${{ vars.MIKROTIK_WG_PEER_IP || '10.10.0.2/32' }}
+          MIKROTIK_HOST: ${{ secrets.MIKROTIK_HOST }}
+          MIKROTIK_USER: ${{ secrets.MIKROTIK_USER }}
+          WG_GATEWAY_PUBKEY: ${{ secrets.WG_GATEWAY_PUBLIC_KEY }}
+          WG_GATEWAY_HOST: ${{ vars.WG_GATEWAY_HOST }}
+          WG_PORT: ${{ vars.WG_PORT || '51820' }}
+          PEER_IP: ${{ vars.MIKROTIK_WG_PEER_IP || '10.10.0.2/32' }}
         run: |
           ssh -i ~/.ssh/mikrotik_id \
               -o StrictHostKeyChecking=no \

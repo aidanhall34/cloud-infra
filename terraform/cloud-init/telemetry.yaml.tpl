@@ -2,14 +2,9 @@
 # vm-telemetry: VictoriaMetrics, Loki, Tempo, Grafana, otelcol-contrib
 # OS: Ubuntu 24.04 Minimal (ARM64 / VM.Standard.A1.Flex, 4 OCPU / 24 GB)
 # All LGTM services run as native binaries under dedicated system users.
-
-package_update: true
-package_upgrade: true
+# Merged with common.yaml.tpl which provides: package_update/upgrade, curl/wget/unzip, otelcol-contrib.
 
 packages:
-  - curl
-  - wget
-  - unzip
   - gnupg2
   - apt-transport-https
   - software-properties-common
@@ -21,7 +16,7 @@ write_files:
   # Restores from S3 on first boot (empty storage dir); skips if data exists.
   # Uses `-` prefix in ExecStartPre so a missing backup does not block startup.
   - path: /usr/local/bin/vmrestore-on-startup.sh
-    permissions: '0755'
+    permissions: "0755"
     content: |
       #!/bin/bash
       STORAGE=/var/lib/victoriametrics
@@ -57,7 +52,8 @@ write_files:
           -storageDataPath=/var/lib/victoriametrics \
           -retentionPeriod=12 \
           -httpListenAddr=0.0.0.0:8428 \
-          -enableTCP6
+          -enableTCP6 \
+          -loggerFormat=json
       Restart=on-failure
       RestartSec=5
 
@@ -102,6 +98,7 @@ write_files:
       server:
         http_listen_port: 3100
         grpc_listen_port: 9096
+        log_format: json
 
       common:
         path_prefix: /var/lib/loki
@@ -165,6 +162,7 @@ write_files:
     content: |
       server:
         http_listen_port: 3200
+        log_format: json
 
       distributor:
         receivers:
@@ -228,6 +226,10 @@ write_files:
       [security]
       secret_key = ${grafana_secret_key}
       disable_initial_admin_creation = true
+
+      [log]
+      mode = console
+      format = json
 
       [users]
       allow_sign_up = false
@@ -326,6 +328,9 @@ write_files:
             insecure: true
 
       service:
+        telemetry:
+          logs:
+            encoding: json
         extensions: [file_storage]
         pipelines:
           metrics:
@@ -403,11 +408,4 @@ runcmd:
   - systemctl enable grafana-server
   - systemctl start grafana-server
 
-  # ── otelcol-contrib ───────────────────────────────────────────────────────
-  - wget -q -O /tmp/otelcol.deb "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${otelcol_version}/otelcol-contrib_${otelcol_version}_linux_arm64.deb"
-  - dpkg -i /tmp/otelcol.deb
-  - rm /tmp/otelcol.deb
-  - mkdir -p /var/lib/otelcol-contrib/filestore
-  - usermod -aG systemd-journal otelcol-contrib
-  - systemctl enable otelcol-contrib
-  - systemctl restart otelcol-contrib
+  # otelcol-contrib installed by common.yaml.tpl

@@ -1,0 +1,11 @@
+profile: production
+
+# Paths to exclude from linting.
+exclude_paths:
+  - .venv/
+  - .collections/
+
+# Raise warnings only (do not fail) for rules that conflict with our
+# intentional use of 'changed_when' in idempotency-aware tasks.
+warn_list:
+  - yaml[line-length]

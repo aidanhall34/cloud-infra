@@ -1,0 +1,123 @@
+---
+# ── Package repositories ───────────────────────────────────────────────────────
+
+- name: Enable Alpine main repository
+  ansible.builtin.lineinfile:
+    path: /etc/apk/repositories
+    regexp: "^#?{{ base_alpine_repo_base }}/main"
+    line: "{{ base_alpine_repo_base }}/main"
+    state: present
+
+- name: Enable Alpine community repository (required for cloud-init)
+  ansible.builtin.lineinfile:
+    path: /etc/apk/repositories
+    regexp: "^#?{{ base_alpine_repo_base }}/community"
+    line: "{{ base_alpine_repo_base }}/community"
+    state: present
+
+# ── Packages ───────────────────────────────────────────────────────────────────
+
+- name: Update APK index
+  community.general.apk:
+    update_cache: true
+
+- name: Upgrade all installed packages
+  community.general.apk:
+    upgrade: true
+
+- name: Install base packages
+  community.general.apk:
+    name: "{{ base_packages }}"
+    state: latest
+
+# ── cloud-init (latest) ────────────────────────────────────────────────────────
+
+- name: Install cloud-init (latest available in community repo)
+  community.general.apk:
+    name: cloud-init
+    state: latest
+  notify: Enable cloud-init services
+
+- name: Ensure cloud-init configuration directory exists
+  ansible.builtin.file:
+    path: /etc/cloud
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure cloud-init datasource and logging
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/90_oracle.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # OCI datasource configuration — applied during Packer base image build.
+      # Oracle datasource reads instance metadata from the OCI IMDS endpoint.
+      datasource_list: {{ base_cloud_init_datasources | to_json }}
+
+      datasource:
+        Oracle:
+          # Retry fetching IMDS metadata up to 10 times on first boot.
+          max_wait: 120
+          timeout: 30
+
+      # JSON structured logging to stdout — aligns with service logging convention.
+      output:
+        all: "| tee -a /var/log/cloud-init-output.log"
+
+      logging:
+        version: 1
+        formatters:
+          json:
+            (): cloudinit.log.LogExporter
+            formatter: json
+        handlers:
+          console:
+            class: logging.StreamHandler
+            formatter: "{{ base_cloud_init_log_format }}"
+            stream: ext://sys.stdout
+        root:
+          level: DEBUG
+          handlers: [console]
+
+- name: Configure cloud-init to use Oracle datasource in cloud.cfg
+  ansible.builtin.lineinfile:
+    path: /etc/cloud/cloud.cfg
+    regexp: "^datasource_list:"
+    line: "datasource_list: {{ base_cloud_init_datasources | to_json }}"
+    state: present
+
+# ── SSH hardening ──────────────────────────────────────────────────────────────
+# Final SSH lockdown is applied by Packer's shell provisioner after Ansible
+# finishes, so cloud-init can inject the authorised key on first boot.
+
+- name: Ensure SSHD is enabled at boot
+  rc_update:
+    name: sshd
+    runlevel: default
+    state: present
+
+# ── Clock sync ────────────────────────────────────────────────────────────────
+
+- name: Enable chrony at boot
+  rc_update:
+    name: chronyd
+    runlevel: default
+    state: present
+
+# ── Clean up ──────────────────────────────────────────────────────────────────
+
+- name: Remove APK cache directory to reduce image size
+  ansible.builtin.file:
+    path: /var/cache/apk
+    state: absent
+
+- name: Recreate empty APK cache directory
+  ansible.builtin.file:
+    path: /var/cache/apk
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

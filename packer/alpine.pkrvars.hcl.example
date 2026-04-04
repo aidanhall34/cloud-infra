@@ -1,0 +1,27 @@
+# Packer variable values for the Alpine base image build.
+# Copy to alpine.pkrvars.hcl and fill in the OCI-specific values.
+# alpine.pkrvars.hcl is gitignored — never commit credentials.
+
+# ── Alpine build settings ─────────────────────────────────────────────────────
+
+alpine_version = "3.21.3"
+alpine_arch    = "x86_64"
+
+# ── QEMU build VM resources ───────────────────────────────────────────────────
+
+disk_size = 4096   # MiB
+memory    = 512    # MiB
+cpus      = 2
+
+# ── Packer SSH (temporary, not baked into the final image) ───────────────────
+
+ssh_password = "changeme"
+
+# ── OCI upload ────────────────────────────────────────────────────────────────
+# oci_namespace:       found at: OCI Console → Object Storage → Namespace
+# oci_compartment_ocid: found at: OCI Console → Identity → Compartments
+
+oci_namespace        = "your-tenancy-namespace"
+oci_bucket           = "packer-images"
+oci_compartment_ocid = "ocid1.compartment.oc1..aaaa..."
+oci_region           = "ap-sydney-1"

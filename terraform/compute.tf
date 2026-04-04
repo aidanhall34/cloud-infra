@@ -38,6 +38,83 @@ locals {
   telemetry_s3_insecure      = var.telemetry_s3_endpoint != "" ? startswith(var.telemetry_s3_endpoint, "http://") : false
 }
 
+# --- cloud-init assembly (common + VM-specific merged as MIME multipart) ---
+# The cloudinit provider combines the shared base config with each VM's specific
+# config. list(append)+dict(recurse_array) on the VM part ensures packages,
+# runcmd, and write_files arrays are concatenated (not replaced).
+
+data "cloudinit_config" "gateway" {
+  gzip          = false
+  base64_encode = true
+
+  part {
+    filename     = "common.yaml"
+    content_type = "text/cloud-config"
+    content = templatefile("${path.module}/cloud-init/common.yaml.tpl", {
+      otelcol_version = var.otelcol_version
+    })
+  }
+
+  part {
+    filename     = "gateway.yaml"
+    content_type = "text/cloud-config"
+    merge_type   = "list(append)+dict(recurse_array)+str()"
+    content = templatefile("${path.module}/cloud-init/gateway.yaml.tpl", {
+      telemetry_hostname            = local.telemetry_internal_hostname
+      wireguard_subnet              = var.wireguard_subnet
+      wireguard_port                = var.wireguard_port
+      wireguard_private_key         = local.wireguard_private_key
+      wireguard_mikrotik_public_key = local.wireguard_mikrotik_public_key
+      static_site_domain            = var.static_site_domain
+      blocky_version                = var.blocky_version
+      blocky_adlists                = file("${path.module}/../config/dns/adlists.txt")
+      blocky_allowlist              = file("${path.module}/../config/dns/allowlist.txt")
+      blocky_local_dns              = file("${path.module}/../config/dns/local_dns.txt")
+    })
+  }
+}
+
+data "cloudinit_config" "telemetry" {
+  gzip          = false
+  base64_encode = true
+
+  part {
+    filename     = "common.yaml"
+    content_type = "text/cloud-config"
+    content = templatefile("${path.module}/cloud-init/common.yaml.tpl", {
+      otelcol_version = var.otelcol_version
+    })
+  }
+
+  part {
+    filename     = "telemetry.yaml"
+    content_type = "text/cloud-config"
+    merge_type   = "list(append)+dict(recurse_array)+str()"
+    content = templatefile("${path.module}/cloud-init/telemetry.yaml.tpl", {
+      victoriametrics_version      = var.victoriametrics_version
+      loki_version                 = var.loki_version
+      tempo_version                = var.tempo_version
+      grafana_github_client_id     = local.grafana_github_client_id
+      grafana_github_client_secret = local.grafana_github_client_secret
+      grafana_secret_key           = local.grafana_secret_key
+      grafana_github_org           = var.grafana_github_org
+      grafana_admin_user           = var.grafana_admin_user
+      grafana_oauth_auth_url       = var.grafana_oauth_auth_url
+      grafana_oauth_token_url      = var.grafana_oauth_token_url
+      grafana_oauth_api_url        = var.grafana_oauth_api_url
+      telemetry_s3_endpoint        = var.telemetry_s3_endpoint
+      telemetry_s3_endpoint_host   = local.telemetry_s3_endpoint_host
+      telemetry_s3_insecure        = local.telemetry_s3_insecure
+      telemetry_s3_region          = var.telemetry_s3_region
+      telemetry_s3_bucket_loki     = var.telemetry_s3_bucket_loki
+      telemetry_s3_bucket_tempo    = var.telemetry_s3_bucket_tempo
+      telemetry_s3_bucket_vmbackup = var.telemetry_s3_bucket_vmbackup
+      telemetry_s3_access_key      = local.telemetry_s3_access_key
+      telemetry_s3_secret_key      = local.telemetry_s3_secret_key
+    })
+  }
+}
+
 # --- vm-gateway (E2.1.Micro, x86, Always Free) ---
 # Runs: WireGuard, Blocky DNS, Nginx, otelcol-contrib
 #
@@ -69,19 +146,7 @@ resource "oci_core_instance" "gateway" {
 
   metadata = {
     ssh_authorized_keys = var.ssh_public_key
-    user_data = base64encode(templatefile("${path.module}/cloud-init/gateway.yaml.tpl", {
-      telemetry_hostname            = local.telemetry_internal_hostname
-      wireguard_subnet              = var.wireguard_subnet
-      wireguard_port                = var.wireguard_port
-      wireguard_private_key         = local.wireguard_private_key
-      wireguard_mikrotik_public_key = local.wireguard_mikrotik_public_key
-      static_site_domain            = var.static_site_domain
-      blocky_version                = var.blocky_version
-      blocky_adlists                = file("${path.module}/../config/dns/adlists.txt")
-      blocky_allowlist              = file("${path.module}/../config/dns/allowlist.txt")
-      blocky_local_dns              = file("${path.module}/../config/dns/local_dns.txt")
-      otelcol_version               = var.otelcol_version
-    }))
+    user_data           = data.cloudinit_config.gateway.rendered
   }
 }
 
@@ -132,28 +197,6 @@ resource "oci_core_instance" "telemetry" {
 
   metadata = {
     ssh_authorized_keys = var.ssh_public_key
-    user_data = base64encode(templatefile("${path.module}/cloud-init/telemetry.yaml.tpl", {
-      otelcol_version              = var.otelcol_version
-      victoriametrics_version      = var.victoriametrics_version
-      loki_version                 = var.loki_version
-      tempo_version                = var.tempo_version
-      grafana_github_client_id     = local.grafana_github_client_id
-      grafana_github_client_secret = local.grafana_github_client_secret
-      grafana_secret_key           = local.grafana_secret_key
-      grafana_github_org           = var.grafana_github_org
-      grafana_admin_user           = var.grafana_admin_user
-      grafana_oauth_auth_url       = var.grafana_oauth_auth_url
-      grafana_oauth_token_url      = var.grafana_oauth_token_url
-      grafana_oauth_api_url        = var.grafana_oauth_api_url
-      telemetry_s3_endpoint        = var.telemetry_s3_endpoint
-      telemetry_s3_endpoint_host   = local.telemetry_s3_endpoint_host
-      telemetry_s3_insecure        = local.telemetry_s3_insecure
-      telemetry_s3_region          = var.telemetry_s3_region
-      telemetry_s3_bucket_loki     = var.telemetry_s3_bucket_loki
-      telemetry_s3_bucket_tempo    = var.telemetry_s3_bucket_tempo
-      telemetry_s3_bucket_vmbackup = var.telemetry_s3_bucket_vmbackup
-      telemetry_s3_access_key      = local.telemetry_s3_access_key
-      telemetry_s3_secret_key      = local.telemetry_s3_secret_key
-    }))
+    user_data           = data.cloudinit_config.telemetry.rendered
   }
 }

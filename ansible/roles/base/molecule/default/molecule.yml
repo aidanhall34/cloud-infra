@@ -1,0 +1,51 @@
+---
+# Molecule test suite for the base role.
+# Uses the Docker driver with a systemd-compatible Alpine container.
+# Alpine uses OpenRC (not systemd), so the container is configured with
+# /sbin/init as the command and privileged mode for cgroup access.
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../../../requirements.yml
+    collections-path: ../../../../.collections
+
+driver:
+  name: docker
+
+platforms:
+  - name: alpine-base
+    # Alpine Linux — matches the target OS of the base role.
+    image: alpine:latest
+    pre_build_image: true
+    # Privileged + cgroup mount required for OpenRC service management.
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+    command: /sbin/init
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        # Alpine installs Python 3 to /usr/bin/python3. Pin the path so Ansible
+        # does not attempt auto-discovery, which fails on a minimal Alpine image.
+        ansible_python_interpreter: /usr/bin/python3
+  env:
+    # MOLECULE_PROJECT_DIRECTORY is the absolute path to the role directory;
+    # use it for all paths to avoid CWD-relative resolution issues.
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
+    ANSIBLE_STDOUT_CALLBACK: json
+
+verifier:
+  name: ansible
+
+lint: |
+  set -e
+  cd ../../../../
+  uv run ansible-lint roles/base

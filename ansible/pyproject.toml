@@ -1,0 +1,26 @@
+[project]
+name = "ansible-homelab"
+version = "0.1.0"
+description = "Ansible automation for homelab infrastructure"
+requires-python = ">=3.13"
+dependencies = [
+    "ansible>=10.0.0",
+    "ansible-lint>=25.0.0",
+    "molecule>=25.0.0",
+    "molecule-plugins[docker]>=23.5.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+    "mypy>=1.15.0",
+    "ruff>=0.9.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true

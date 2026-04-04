@@ -63,19 +63,19 @@ validate: ## Run terraform validate
 
 .PHONY: ci-plan
 ci-plan: ## Run the deploy workflow (plan action) locally via act
-	act workflow_dispatch $(ACT_FLAGS) \
+	act workflow_dispatch  --json $(ACT_FLAGS) \
 	  --input action=plan \
 	  --workflows .github/workflows/deploy.yml
 
 .PHONY: ci-apply
 ci-apply: ## Run the deploy workflow (apply action) locally via act
-	act workflow_dispatch $(ACT_FLAGS) \
+	act workflow_dispatch  --json $(ACT_FLAGS) \
 	  --input action=apply \
 	  --workflows .github/workflows/deploy.yml
 
 .PHONY: ci-destroy
 ci-destroy: ## Run the deploy workflow (destroy action) locally via act
-	act workflow_dispatch $(ACT_FLAGS) \
+	act workflow_dispatch  --json $(ACT_FLAGS) \
 	  --input action=destroy \
 	  --workflows .github/workflows/deploy.yml
 
@@ -104,7 +104,7 @@ generate-grafana-key: ## Generate a new Grafana session signing key (secrets/gra
 
 .PHONY: mikrotik
 mikrotik: ## Configure MikroTik WireGuard + DNS via act (local only, not real GitHub Actions)
-	act workflow_dispatch $(ACT_FLAGS) \
+	act workflow_dispatch  --json $(ACT_FLAGS) \
 	  --workflows .github/workflows/mikrotik-configure.yml
 
 ## Cloud-init boot tests
@@ -122,15 +122,90 @@ ACT_ARM_FLAGS := --platform ubuntu-24.04-arm=catthehacker/ubuntu:act-latest \
 
 .PHONY: test-telemetry
 test-telemetry: ## Boot-test the telemetry VM cloud-init (Grafana, VictoriaMetrics, Loki, Tempo)
-	act workflow_dispatch $(ACT_ARM_FLAGS) \
+	act workflow_dispatch  --json $(ACT_ARM_FLAGS) \
 	  --job test-telemetry \
 	  --workflows .github/workflows/test-cloud-init.yml
 
 .PHONY: test-gateway
 test-gateway: ## Boot-test the gateway VM cloud-init (Blocky DNS, Nginx)
-	act workflow_dispatch $(ACT_FLAGS) \
+	act workflow_dispatch  --json $(ACT_FLAGS) \
 	  --job test-gateway \
 	  --workflows .github/workflows/test-cloud-init.yml
 
 .PHONY: test
 test: test-gateway test-telemetry ## Run all cloud-init boot tests
+
+.PHONY: test-clean
+test-clean: ## Remove all test containers left over from a local test run
+	docker rm -f testenv minio 2>/dev/null || true
+
+## Python linting
+
+.PHONY: lint
+lint: ## Lint all Python code with ruff
+	cd $(SCRIPTS_DIR) && uv run ruff check .
+	cd $(ANSIBLE_DIR) && uv run ruff check .
+
+## Ansible
+
+ANSIBLE_DIR := ansible
+
+.PHONY: ansible-lint
+ansible-lint: ## Lint Ansible roles and modules with ansible-lint
+	cd $(ANSIBLE_DIR) && uv run ansible-lint -f json
+
+.PHONY: ansible-molecule
+ansible-molecule: ## Run molecule integration tests for all roles (Docker, systemd-compatible containers)
+	for role in $(ANSIBLE_DIR)/roles/*/; do \
+		(cd "$$role" && uv run molecule test); \
+	done
+
+.PHONY: ansible-pytest
+ansible-pytest: ## Run pytest unit tests for custom Ansible modules
+	cd $(ANSIBLE_DIR) && uv run pytest tests/unit/ -v
+
+.PHONY: ansible-doc
+ansible-doc: ## Generate documentation for all custom Ansible modules into docs/ansible-modules/
+	mkdir -p docs/ansible-modules
+	for role_lib in $(ANSIBLE_DIR)/roles/*/library; do \
+		for module in "$$role_lib"/*.py; do \
+			[ -f "$$module" ] || continue; \
+			name=$$(basename "$$module" .py); \
+			rel=$$(realpath --relative-to=$(ANSIBLE_DIR) "$$role_lib"); \
+			cd $(ANSIBLE_DIR) && uv run ansible-doc -M "$$rel" "$$name" > "../docs/ansible-modules/$$name.txt"; \
+			cd ..; \
+		done; \
+	done
+
+## Packer — image builds
+
+.PHONY: packer-init
+packer-init: ## Initialise Packer plugins (run once after checkout)
+	cd packer && packer init .
+
+.PHONY: packer-build
+packer-build: ## Build the Alpine base image and upload it to OCI
+	cd packer && packer build -var-file=alpine.pkrvars.hcl .
+
+.PHONY: packer-validate
+packer-validate: ## Validate Packer configuration without building
+	cd packer && packer validate -var-file=alpine.pkrvars.hcl .
+
+.PHONY: packer-fmt
+packer-fmt: ## Format Packer configuration
+	cd packer && packer fmt .
+
+## Scripts container
+
+.PHONY: build
+build: ## Build the scripts container image (aidanhall34/homelab:latest)
+	docker build \
+		--progress rawjson \
+		-t aidanhall34/homelab:latest \
+		$(SCRIPTS_DIR)
+
+## Documentation
+
+.PHONY: readme
+readme: ## Regenerate README.md from README.md.tpl and Makefile comments
+	uv run --python 3.13 $(SCRIPTS_DIR)/generate-readme.py

@@ -1,0 +1,49 @@
+---
+- name: Verify base role
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Assert cloud-init is installed
+      ansible.builtin.command: which cloud-init
+      changed_when: false
+
+    - name: Assert cloud-init OCI config file is present
+      ansible.builtin.stat:
+        path: /etc/cloud/cloud.cfg.d/90_oracle.cfg
+      register: base_oci_cfg
+      failed_when: not base_oci_cfg.stat.exists
+
+    - name: Assert OCI datasource is configured
+      ansible.builtin.command: grep -q "Oracle" /etc/cloud/cloud.cfg.d/90_oracle.cfg
+      changed_when: false
+
+    - name: Assert sshd is enabled in default runlevel
+      ansible.builtin.stat:
+        path: /etc/runlevels/default/sshd
+      register: base_sshd_runlevel
+      failed_when: not base_sshd_runlevel.stat.exists
+
+    - name: Assert chronyd is enabled in default runlevel
+      ansible.builtin.stat:
+        path: /etc/runlevels/default/chronyd
+      register: base_chronyd_runlevel
+      failed_when: not base_chronyd_runlevel.stat.exists
+
+    - name: Assert cloud-init services are in default runlevel
+      ansible.builtin.stat:
+        path: "/etc/runlevels/default/{{ item }}"
+      register: base_ci_svc
+      failed_when: not base_ci_svc.stat.exists
+      loop:
+        - cloud-init-local
+        - cloud-init
+        - cloud-config
+        - cloud-final
+
+    - name: Assert APK cache is empty (image size reduction)
+      ansible.builtin.find:
+        paths: /var/cache/apk
+        file_type: file
+      register: base_apk_cache
+      failed_when: base_apk_cache.matched > 0

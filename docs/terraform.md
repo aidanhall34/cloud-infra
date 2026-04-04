@@ -104,12 +104,15 @@ Image lookup and instance resources.
 | `data "oci_core_images" ubuntu_amd64` | [compute.tf:5](../terraform/compute.tf#L5) | Latest Ubuntu 24.04 Minimal for E2.1.Micro |
 | `data "oci_core_images" ubuntu_arm64` | [compute.tf:15](../terraform/compute.tf#L15) | Latest Ubuntu 24.04 Minimal aarch64 for A1.Flex |
 | `local.telemetry_internal_hostname` | [compute.tf:33](../terraform/compute.tf#L33) | Stable OCI VCN DNS hostname for vm-telemetry |
-| `oci_core_instance.gateway` | [compute.tf:42](../terraform/compute.tf#L42) | vm-gateway, `create_before_destroy = true` (2x E2.1.Micro fits free tier) |
-| `oci_core_instance.telemetry` | [compute.tf:92](../terraform/compute.tf#L92) | vm-telemetry, `create_before_destroy = true` (see warning: ARM free pool is shared) |
+| `data "cloudinit_config" "gateway"` | [compute.tf:46](../terraform/compute.tf#L46) | Assembles common + gateway cloud-init as MIME multipart |
+| `data "cloudinit_config" "telemetry"` | [compute.tf:77](../terraform/compute.tf#L77) | Assembles common + telemetry cloud-init as MIME multipart |
+| `oci_core_instance.gateway` | [compute.tf:124](../terraform/compute.tf#L124) | vm-gateway, `create_before_destroy = true` (2x E2.1.Micro fits free tier) |
+| `oci_core_instance.telemetry` | [compute.tf:162](../terraform/compute.tf#L162) | vm-telemetry, `create_before_destroy = true` (see warning: ARM free pool is shared) |
 
-Both instances render their cloud-init template via `templatefile()`.
-Secrets are passed from `locals` in `secrets.tf`, never from direct variable
-values.
+Cloud-init is assembled by `data "cloudinit_config"` blocks which merge `common.yaml.tpl`
+and the VM-specific template as MIME multipart. Each instance references
+`data.cloudinit_config.<vm>.rendered` in its `user_data` metadata field.
+Secrets are passed from `locals` in `secrets.tf`, never from direct variable values.
 
 ---
 
@@ -128,8 +131,8 @@ values.
 
 ### [`cloud-init/gateway.yaml.tpl`](../terraform/cloud-init/gateway.yaml.tpl)
 
-Cloud-init template for `vm-gateway`. Rendered by Terraform via
-`templatefile()` at [compute.tf:67](../terraform/compute.tf#L67).
+Cloud-init template for `vm-gateway`. Assembled into MIME multipart by
+[`data "cloudinit_config" "gateway"`](../terraform/compute.tf#L46) in `compute.tf`.
 
 Key sections:
 
@@ -153,7 +156,8 @@ Template variables: `telemetry_hostname`, `wireguard_subnet`, `wireguard_port`,
 
 ### [`cloud-init/telemetry.yaml.tpl`](../terraform/cloud-init/telemetry.yaml.tpl)
 
-Cloud-init template for `vm-telemetry`. Rendered at [compute.tf:122](../terraform/compute.tf#L122).
+Cloud-init template for `vm-telemetry`. Assembled into MIME multipart by
+[`data "cloudinit_config" "telemetry"`](../terraform/compute.tf#L77) in `compute.tf`.
 
 Key sections:
 

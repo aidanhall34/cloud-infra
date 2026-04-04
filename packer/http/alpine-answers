@@ -1,0 +1,22 @@
+# Alpine Linux automated setup-alpine answer file.
+# Used by the Packer boot_command to perform an unattended installation.
+# Disk target must match the QEMU virtio disk device (vda).
+
+KEYMAPOPTS="us us"
+HOSTNAMEOPTS="-n alpine-base"
+INTERFACESOPTS="auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet dhcp
+  hostname alpine-base
+"
+DNSOPTS="-d alpinelinux.org -n 1.1.1.1 1.0.0.1"
+TIMEZONEOPTS="-z UTC"
+PROXYOPTS="none"
+APKREPOSOPTS="-f"
+SSHDOPTS="-c openssh"
+NTPOPTS="-c chrony"
+DISKOPTS="-m sys /dev/vda"
+LBUOPTS="none"
+APKCACHEOPTS="none"

@@ -1,0 +1,12 @@
+---
+- name: Enable cloud-init services
+  rc_update:
+    name: "{{ item }}"
+    runlevel: default
+    state: present
+  loop:
+    - cloud-init-local
+    - cloud-init
+    - cloud-config
+    - cloud-final
+  listen: Enable cloud-init services

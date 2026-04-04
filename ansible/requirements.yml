@@ -1,0 +1,7 @@
+---
+# Ansible Galaxy collection requirements.
+# Install with: cd ansible && uv run ansible-galaxy collection install -r requirements.yml -p .collections
+
+collections:
+  - name: community.general
+    version: ">=9.0.0"

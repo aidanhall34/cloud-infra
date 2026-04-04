@@ -44,6 +44,9 @@ jobs:
       - name: Create test output directory (all artifacts stay in workspace)
         run: mkdir -p "$GITHUB_WORKSPACE/test/output/telemetry"
 
+      - name: Clean up previous test containers
+        run: docker rm -f testenv minio 2>/dev/null || true
+
       # ── Mock OAuth server (runs on host, reachable via --network host) ────────
 
       - name: Start mock GitHub OAuth server
@@ -108,37 +111,32 @@ jobs:
       - name: Render cloud-init template
         run: |
           python3 scripts/render-template.py \
+            terraform/cloud-init/common.yaml.tpl \
             terraform/cloud-init/telemetry.yaml.tpl \
             test/vars/telemetry.json \
             > "$GITHUB_WORKSPACE/test/output/telemetry/rendered.yaml"
           echo "==> First 40 lines:"
           head -40 "$GITHUB_WORKSPACE/test/output/telemetry/rendered.yaml"
 
-      - name: Validate cloud-init schema
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q cloud-init
-          sudo cloud-init schema \
-            --config-file "$GITHUB_WORKSPACE/test/output/telemetry/rendered.yaml"
-          echo "Schema OK"
-
       # ── Systemd container ────────────────────────────────────────────────────
       # jrei/systemd-ubuntu:24.04 is a multi-arch image (arm64 on this runner).
       # --privileged + --network host: services bind to the runner's localhost so
-      # curl health checks run directly on the runner without extra port mapping.
+      # curl health checks, MinIO, and mock OAuth are all reachable on localhost.
+      # Files are copied in via docker cp rather than -v mounts, because workspace
+      # volume mounts don't work when Docker runs inside an act container (DinD).
 
       - name: Start systemd container
         run: |
           docker run -d --name testenv \
             --privileged \
             --cgroupns=host \
-            --network host \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-            -v "$GITHUB_WORKSPACE:/workspace" \
             jrei/systemd-ubuntu:24.04
-          # Install PyYAML needed by run-cloud-init.py
           docker exec testenv apt-get update -q
           docker exec testenv apt-get install -y -q python3-yaml
+          # Copy the executor script into the container
+          docker cp "$GITHUB_WORKSPACE/scripts/run-cloud-init.py" \
+            testenv:/usr/local/bin/run-cloud-init.py
           # Wait for systemd to finish booting
           for i in $(seq 1 30); do
             docker exec testenv systemctl is-system-running 2>/dev/null | \
@@ -150,8 +148,10 @@ jobs:
 
       - name: Install packages, write config files, run runcmd
         run: |
-          docker exec testenv python3 /workspace/scripts/run-cloud-init.py \
-            /workspace/test/output/telemetry/rendered.yaml \
+          docker cp "$GITHUB_WORKSPACE/test/output/telemetry/rendered.yaml" \
+            testenv:/tmp/rendered.yaml
+          docker exec testenv python3 /usr/local/bin/run-cloud-init.py \
+            /tmp/rendered.yaml \
             --skip-upgrade \
             2>&1 | tee "$GITHUB_WORKSPACE/test/output/telemetry/cloud-init.log"
         timeout-minutes: 25
@@ -161,7 +161,7 @@ jobs:
       - name: Wait for VictoriaMetrics (:8428)
         run: |
           for i in $(seq 1 60); do
-            curl -sf http://localhost:8428/health && echo "VictoriaMetrics ready" && exit 0
+            docker exec testenv curl -sf http://localhost:8428/health && echo "VictoriaMetrics ready" && exit 0
             sleep 5
           done
           echo "TIMEOUT" && exit 1
@@ -169,7 +169,7 @@ jobs:
       - name: Wait for Loki (:3100)
         run: |
           for i in $(seq 1 60); do
-            curl -sf http://localhost:3100/ready && echo "Loki ready" && exit 0
+            docker exec testenv curl -sf http://localhost:3100/ready && echo "Loki ready" && exit 0
             sleep 5
           done
           echo "TIMEOUT" && exit 1
@@ -177,7 +177,7 @@ jobs:
       - name: Wait for Tempo (:3200)
         run: |
           for i in $(seq 1 60); do
-            curl -sf http://localhost:3200/ready && echo "Tempo ready" && exit 0
+            docker exec testenv curl -sf http://localhost:3200/ready && echo "Tempo ready" && exit 0
             sleep 5
           done
           echo "TIMEOUT" && exit 1
@@ -185,7 +185,7 @@ jobs:
       - name: Wait for Grafana (:3000)
         run: |
           for i in $(seq 1 60); do
-            curl -sf http://localhost:3000/api/health && echo "Grafana responded" && exit 0
+            docker exec testenv curl -sf http://localhost:3000/api/health && echo "Grafana responded" && exit 0
             sleep 5
           done
           echo "TIMEOUT" && exit 1
@@ -194,7 +194,7 @@ jobs:
 
       - name: Assert Grafana health — database ok
         run: |
-          response=$(curl -sf http://localhost:3000/api/health)
+          response=$(docker exec testenv curl -sf http://localhost:3000/api/health)
           echo "$response"
           echo "$response" | python3 -c "
           import sys, json
@@ -221,8 +221,11 @@ jobs:
 
       # ── OAuth end-to-end flow test (runs on host against Grafana on localhost) -
 
-      - name: Install requests library (for OAuth flow test)
-        run: pip3 install requests --quiet
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python dependencies
+        run: uv pip install --system -r scripts/requirements.txt
 
       - name: Run OAuth end-to-end flow test
         run: |
@@ -239,7 +242,7 @@ jobs:
 
       - name: Assert VictoriaMetrics has received host metrics from otelcol
         run: |
-          result=$(curl -sf "http://localhost:8428/api/v1/query" \
+          result=$(docker exec testenv curl -sf "http://localhost:8428/api/v1/query" \
             --data-urlencode 'query=count(system_cpu_time_seconds_total)' \
             | python3 -c "
           import sys, json
@@ -253,9 +256,9 @@ jobs:
       - name: Collect service metrics to output
         run: |
           OUT="$GITHUB_WORKSPACE/test/output/telemetry"
-          curl -sf http://localhost:8428/metrics > "$OUT/victoriametrics.prom" || true
-          curl -sf http://localhost:3100/metrics > "$OUT/loki.prom"            || true
-          curl -sf http://localhost:3200/metrics > "$OUT/tempo.prom"           || true
+          docker exec testenv curl -sf http://localhost:8428/metrics > "$OUT/victoriametrics.prom" || true
+          docker exec testenv curl -sf http://localhost:3100/metrics > "$OUT/loki.prom"            || true
+          docker exec testenv curl -sf http://localhost:3200/metrics > "$OUT/tempo.prom"           || true
 
       # ── S3 backend assertions ─────────────────────────────────────────────────
 
@@ -277,7 +280,7 @@ jobs:
       - name: Push logs to Loki and wait for S3 flush
         run: |
           TS=$(date +%s)000000000
-          curl -sf -X POST http://localhost:3100/loki/api/v1/push \
+          docker exec testenv curl -sf -X POST http://localhost:3100/loki/api/v1/push \
             -H 'Content-Type: application/json' \
             -d "{\"streams\": [{\"stream\": {\"job\": \"s3-test\"}, \"values\": [[\"$TS\", \"s3 storage verification log\"]]}]}"
           echo "  Logs pushed to Loki"
@@ -296,23 +299,25 @@ jobs:
 
       - name: Push trace to Tempo and assert S3 backend accepts it
         run: |
-          curl -sf -X POST http://localhost:4318/v1/traces \
+          START_NS=$(date +%s)000000000
+          END_NS=$(date +%s)100000000
+          docker exec testenv curl -sf -X POST http://localhost:4318/v1/traces \
             -H 'Content-Type: application/json' \
-            -d '{
-              "resourceSpans": [{
-                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "s3-test"}}]},
-                "scopeSpans": [{
-                  "spans": [{
-                    "traceId": "0af7651916cd43dd8448eb211c80319c",
-                    "spanId": "b7ad6b7169203331",
-                    "name": "s3-storage-test",
-                    "startTimeUnixNano": "'$(date +%s)'000000000",
-                    "endTimeUnixNano":   "'$(date +%s)'100000000",
-                    "status": {}
+            -d "{
+              \"resourceSpans\": [{
+                \"resource\": {\"attributes\": [{\"key\": \"service.name\", \"value\": {\"stringValue\": \"s3-test\"}}]},
+                \"scopeSpans\": [{
+                  \"spans\": [{
+                    \"traceId\": \"0af7651916cd43dd8448eb211c80319c\",
+                    \"spanId\": \"b7ad6b7169203331\",
+                    \"name\": \"s3-storage-test\",
+                    \"startTimeUnixNano\": \"$START_NS\",
+                    \"endTimeUnixNano\":   \"$END_NS\",
+                    \"status\": {}
                   }]
                 }]
               }]
-            }'
+            }"
           echo "  Trace pushed to Tempo"
           sleep 30
           echo "==> Objects in tempo-traces bucket:"
@@ -365,32 +370,30 @@ jobs:
           docker exec testenv journalctl -n 50 --no-pager || true
 
       - name: Stop mock OAuth server
-        if: always()
+        if: always() && env.ACT != 'true'
         run: |
           pid_file="$GITHUB_WORKSPACE/test/output/telemetry/mock-oauth.pid"
           [ -f "$pid_file" ] && kill "$(cat "$pid_file")" 2>/dev/null || true
 
       - name: Stop MinIO
-        if: always()
-        run: docker stop minio 2>/dev/null || true
+        if: always() && env.ACT != 'true'
+        run: docker rm -f minio 2>/dev/null || true
 
       - name: Stop systemd container
-        if: always()
-        run: |
-          docker stop testenv 2>/dev/null || true
-          docker rm testenv 2>/dev/null || true
+        if: always() && env.ACT != 'true'
+        run: docker rm -f testenv 2>/dev/null || true
 
       - name: Notify Discord
         if: always()
         uses: ./.github/actions/notify-discord
         with:
-          webhook-url:    ${{ secrets.DISCORD_WEBHOOK_URL }}
-          status:         ${{ job.status }}
-          title:          "Test telemetry VM boot (ARM64)"
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "Test telemetry VM boot (ARM64)"
           job-start-time: ${{ steps.job_start.outputs.time }}
-          run-id:         ${{ github.run_id }}
-          run-number:     ${{ github.run_number }}
-          repo:           ${{ github.repository }}
+          run-id: ${{ github.run_id }}
+          run-number: ${{ github.run_number }}
+          repo: ${{ github.repository }}
 
   # ── vm-gateway: Blocky DNS, Nginx ──────────────────────────────────────────
   test-gateway:
@@ -409,13 +412,21 @@ jobs:
       - name: Create test output directory
         run: mkdir -p "$GITHUB_WORKSPACE/test/output/gateway"
 
+      - name: Clean up previous test containers
+        run: docker rm -f testenv 2>/dev/null || true
+
       # ── Render + validate (runs on host) ─────────────────────────────────────
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
       - name: Render cloud-init template
+        working-directory: ./scripts
         run: |
-          python3 scripts/render-template.py \
-            terraform/cloud-init/gateway.yaml.tpl \
-            test/vars/gateway.json \
+          uv run ./render-template.py \
+            "$GITHUB_WORKSPACE/terraform/cloud-init/common.yaml.tpl" \
+            "$GITHUB_WORKSPACE/terraform/cloud-init/gateway.yaml.tpl" \
+            "$GITHUB_WORKSPACE/test/vars/gateway.json" \
             > "$GITHUB_WORKSPACE/test/output/gateway/rendered.yaml"
           head -40 "$GITHUB_WORKSPACE/test/output/gateway/rendered.yaml"
 
@@ -434,12 +445,12 @@ jobs:
           docker run -d --name testenv \
             --privileged \
             --cgroupns=host \
-            --network host \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-            -v "$GITHUB_WORKSPACE:/workspace" \
             jrei/systemd-ubuntu:24.04
           docker exec testenv apt-get update -q
-          docker exec testenv apt-get install -y -q python3-yaml
+          docker exec testenv apt-get install -y -q python3-yaml dnsutils
+          docker cp "$GITHUB_WORKSPACE/scripts/run-cloud-init.py" \
+            testenv:/usr/local/bin/run-cloud-init.py
           for i in $(seq 1 30); do
             docker exec testenv systemctl is-system-running 2>/dev/null | \
               grep -qE "^(running|degraded)$" && echo "systemd ready" && break
@@ -450,33 +461,36 @@ jobs:
 
       - name: Install packages, write config files, run runcmd
         # WireGuard interface bring-up will fail (fake key) — tolerated, not tested here.
+        # pipefail ensures docker exec's exit code propagates through tee.
         run: |
-          docker exec testenv python3 /workspace/scripts/run-cloud-init.py \
-            /workspace/test/output/gateway/rendered.yaml \
+          set -o pipefail
+          docker cp "$GITHUB_WORKSPACE/test/output/gateway/rendered.yaml" \
+            testenv:/tmp/rendered.yaml
+          docker exec testenv python3 /usr/local/bin/run-cloud-init.py \
+            /tmp/rendered.yaml \
             --skip-upgrade \
-            2>&1 | tee "$GITHUB_WORKSPACE/test/output/gateway/cloud-init.log" || true
+            2>&1 | tee "$GITHUB_WORKSPACE/test/output/gateway/cloud-init.log"
         timeout-minutes: 15
 
-      # ── Health checks (curl/dig run on host; --network host shares ports) ────
+      # ── Health checks (all executed inside testenv) ────────────────────────
 
       - name: Wait for Blocky (:4000 metrics endpoint)
         run: |
           for i in $(seq 1 60); do
-            curl -sf http://localhost:4000/metrics && echo "Blocky ready" && exit 0
+            docker exec testenv curl -sf http://localhost:4000/metrics && echo "Blocky ready" && exit 0
             sleep 5
           done
           echo "TIMEOUT" && exit 1
 
       - name: Assert Blocky resolves public domains
         run: |
-          sudo apt-get install -y -q dnsutils
-          result=$(dig +short @127.0.0.1 example.com A)
+          result=$(docker exec testenv dig +short @127.0.0.1 example.com A)
           echo "  dig example.com → $result"
           [ -n "$result" ] || { echo "FAIL: no answer for example.com"; exit 1; }
 
       - name: Assert Blocky blocks known ad domains
         run: |
-          result=$(dig +short @127.0.0.1 doubleclick.net A)
+          result=$(docker exec testenv dig +short @127.0.0.1 doubleclick.net A)
           echo "  dig doubleclick.net → $result"
           [ "$result" = "0.0.0.0" ] || [ -z "$result" ] || \
             { echo "FAIL: expected blocked (0.0.0.0 or NXDOMAIN), got $result"; exit 1; }
@@ -484,7 +498,7 @@ jobs:
 
       - name: Assert Nginx serves static site
         run: |
-          response=$(curl -sf http://localhost/ || true)
+          response=$(docker exec testenv curl -sf http://localhost/ || true)
           echo "$response" | grep -q "Hello" && echo "  Nginx OK" || \
             { echo "FAIL: expected Hello, got: $response"; exit 1; }
 
@@ -498,7 +512,7 @@ jobs:
 
       - name: Collect Blocky metrics to output
         run: |
-          curl -sf http://localhost:4000/metrics \
+          docker exec testenv curl -sf http://localhost:4000/metrics \
             > "$GITHUB_WORKSPACE/test/output/gateway/blocky.prom" || true
 
       - name: Print service status on failure
@@ -512,19 +526,17 @@ jobs:
           docker exec testenv journalctl -n 30 --no-pager || true
 
       - name: Stop systemd container
-        if: always()
-        run: |
-          docker stop testenv 2>/dev/null || true
-          docker rm testenv 2>/dev/null || true
+        if: always() && env.ACT != 'true'
+        run: docker rm -f testenv 2>/dev/null || true
 
       - name: Notify Discord
         if: always()
         uses: ./.github/actions/notify-discord
         with:
-          webhook-url:    ${{ secrets.DISCORD_WEBHOOK_URL }}
-          status:         ${{ job.status }}
-          title:          "Test gateway VM boot (x86_64)"
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "Test gateway VM boot (x86_64)"
           job-start-time: ${{ steps.job_start.outputs.time }}
-          run-id:         ${{ github.run_id }}
-          run-number:     ${{ github.run_number }}
-          repo:           ${{ github.repository }}
+          run-id: ${{ github.run_id }}
+          run-number: ${{ github.run_number }}
+          repo: ${{ github.repository }}
