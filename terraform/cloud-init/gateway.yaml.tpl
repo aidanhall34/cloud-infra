@@ -1,17 +1,9 @@
 #cloud-config
 # vm-gateway: WireGuard VPN, Blocky DNS, Nginx static site, otelcol-contrib
-# OS: Ubuntu 24.04 Minimal (x86 / VM.Standard.E2.1.Micro)
-# Merged with common.yaml.tpl which provides: package_update/upgrade, curl/wget/unzip, otelcol-contrib.
-
-packages:
-  - wireguard
-  - wireguard-tools
-  - nginx
-  - certbot
-  - python3-certbot-nginx
-  - iptables
-  - iptables-persistent
-  - netfilter-persistent
+# OS: Alpine Linux (x86, VM.Standard.E2.1.Micro)
+# Built via Packer + Ansible (base, common, gateway roles).
+# Packages, binaries, and OpenRC services are pre-installed in the image.
+# This file handles per-instance runtime configuration only.
 
 write_files:
   # ── WireGuard private key ────────────────────────────────────────────────
@@ -187,28 +179,9 @@ write_files:
 
       echo "blocky-generate-config: wrote $OUTPUT"
 
-  # ── Blocky systemd unit ──────────────────────────────────────────────────
-  - path: /etc/systemd/system/blocky.service
-    content: |
-      [Unit]
-      Description=Blocky DNS ad-blocker
-      After=network.target
-
-      [Service]
-      Type=simple
-      User=blocky
-      # CAP_NET_BIND_SERVICE allows binding port 53 without root
-      AmbientCapabilities=CAP_NET_BIND_SERVICE
-      CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-      ExecStart=/usr/local/bin/blocky --config /etc/blocky/config.yaml
-      Restart=on-failure
-      RestartSec=5
-
-      [Install]
-      WantedBy=multi-user.target
-
   # ── Nginx: public static site ────────────────────────────────────────────
-  - path: /etc/nginx/sites-available/homelab
+  # Alpine Nginx uses /etc/nginx/http.d/ — no sites-available/sites-enabled.
+  - path: /etc/nginx/http.d/homelab.conf
     content: |
       server {
           listen 80 default_server;
@@ -231,6 +204,8 @@ write_files:
       </html>
 
   # ── otelcol-contrib config ───────────────────────────────────────────────
+  # Binary and OpenRC service installed by Packer common role.
+  # Only the per-instance config (endpoints) is written here.
   - path: /etc/otelcol-contrib/config.yaml
     content: |
       extensions:
@@ -250,10 +225,14 @@ write_files:
             process:
               mute_process_name_error: true
 
-        journald:
-          directory: /var/log/journal
+        # Alpine uses /var/log/messages (syslog) rather than journald.
+        filelog:
+          include:
+            - /var/log/messages
+            - /var/log/blocky.log
+            - /var/log/nginx/access.log
+            - /var/log/nginx/error.log
           start_at: end
-          priority: info
           storage: file_storage
 
         # Scrape Blocky's Prometheus metrics endpoint
@@ -278,8 +257,6 @@ write_files:
           endpoint: http://${telemetry_hostname}:8428/opentelemetry
           tls:
             insecure: true
-        # loki exporter was removed in otelcol-contrib v0.131.0.
-        # Loki 3.x accepts native OTLP at /otlp — otelcol appends /v1/logs.
         otlphttp/loki:
           endpoint: http://${telemetry_hostname}:3100/otlp
           tls:
@@ -300,7 +277,7 @@ write_files:
             processors: [resourcedetection, batch]
             exporters:  [otlphttp/metrics]
           logs:
-            receivers:  [journald]
+            receivers:  [filelog]
             processors: [resourcedetection, batch]
             exporters:  [otlphttp/loki]
           traces:
@@ -310,35 +287,23 @@ write_files:
 
 runcmd:
   # ── Kernel: enable IP forwarding ─────────────────────────────────────────
-  - echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
   - sysctl -p
 
   # ── WireGuard ─────────────────────────────────────────────────────────────
   - /usr/local/bin/wireguard-setup.sh
-  - systemctl enable wg-quick@wg0
-  - systemctl start wg-quick@wg0
+  - rc-service wg-quick.wg0 start
 
   # ── Blocky DNS ────────────────────────────────────────────────────────────
-  - useradd --system --no-create-home --shell /usr/sbin/nologin blocky
-  - wget -q -O /tmp/blocky.tar.gz "https://github.com/0xERR0R/blocky/releases/download/v${blocky_version}/blocky_v${blocky_version}_Linux_x86_64.tar.gz"
-  - tar -xzf /tmp/blocky.tar.gz -C /tmp blocky
-  - mv /tmp/blocky /usr/local/bin/blocky
-  - chmod +x /usr/local/bin/blocky
-  - rm /tmp/blocky.tar.gz
-  - mkdir -p /etc/blocky
   - chown -R blocky:blocky /etc/blocky
   - /usr/local/bin/blocky-generate-config.sh
-  - systemctl daemon-reload
-  - systemctl enable blocky
-  - systemctl start blocky
+  - rc-service blocky start
 
   # ── Nginx ─────────────────────────────────────────────────────────────────
-  - rm -f /etc/nginx/sites-enabled/default
-  - ln -s /etc/nginx/sites-available/homelab /etc/nginx/sites-enabled/homelab
-  - systemctl enable nginx
-  - systemctl start nginx
+  - rc-service nginx start
   %{ if static_site_domain != "" ~}
   - certbot --nginx -d ${static_site_domain} --non-interactive --agree-tos -m admin@${static_site_domain} --redirect
   %{ endif ~}
 
-  # otelcol-contrib installed by common.yaml.tpl
+  # ── otelcol-contrib ───────────────────────────────────────────────────────
+  # Config written above; binary and OpenRC service installed by Packer.
+  - rc-service otelcol-contrib start

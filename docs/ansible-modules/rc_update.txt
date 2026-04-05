@@ -1,0 +1,53 @@
+> MODULE [1mrc_update[0m (/home/ah34/work/homelab/ansible/roles/gateway/library/rc_update.py)
+
+  Add or remove an OpenRC service from a runlevel using `rc-update'.
+  Idempotent — checks `/etc/runlevels/<runlevel>/<name>' before
+  acting.
+
+[1mOPTIONS[0m (red indicates it is required):
+
+   [1mname[0m    Name of the OpenRC service to manage.
+        type: str
+
+   runlevel  Runlevel to add or remove the service from.
+        default: default
+        type: str
+
+   state   `present' ensures the service is in the runlevel.
+           `absent' ensures the service is not in the runlevel.
+        choices: [present, absent]
+        default: present
+        type: str
+
+[1mREQUIREMENTS:[0m  rc-update (part of OpenRC)
+
+
+[1mEXAMPLES:[0m
+- name: Enable sshd at default runlevel
+  rc_update:
+    name: sshd
+    runlevel: default
+    state: present
+
+- name: Remove ntpd from default runlevel
+  rc_update:
+    name: ntpd
+    state: absent
+
+[1mRETURN VALUES:[0m
+
+   name    Service name acted upon.
+        returned: always
+        sample: sshd
+        type: str
+
+   runlevel  Runlevel acted upon.
+        returned: always
+        sample: default
+        type: str
+
+   state   Desired state.
+        returned: always
+        sample: present
+        type: str
+

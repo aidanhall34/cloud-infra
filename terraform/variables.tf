@@ -88,9 +88,8 @@ variable "availability_domain_index" {
 # Set to a specific OCID if the data source lookup fails or you want to pin a version.
 
 variable "gateway_image_ocid" {
-  description = "Image OCID override for vm-gateway. Leave empty for auto-selection."
+  description = "OCID of the custom Alpine gateway image built with packer/gateway.pkr.hcl. Required — run `make packer-build-gateway` to build and upload."
   type        = string
-  default     = ""
 }
 
 variable "telemetry_image_ocid" {
@@ -146,17 +145,6 @@ variable "grafana_admin_user" {
 # --- Component versions ---
 # Update these when new releases are available.
 
-variable "blocky_version" {
-  description = "Blocky DNS ad-blocker version. https://github.com/0xERR0R/blocky/releases"
-  type        = string
-  default     = "0.29.0"
-}
-
-variable "otelcol_version" {
-  description = "otelcol-contrib version. https://github.com/open-telemetry/opentelemetry-collector-releases/releases"
-  type        = string
-  default     = "0.149.0"
-}
 
 variable "victoriametrics_version" {
   description = "VictoriaMetrics version. https://github.com/VictoriaMetrics/VictoriaMetrics/releases"

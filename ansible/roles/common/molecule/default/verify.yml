@@ -1,0 +1,101 @@
+---
+- name: Verify common role
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # ── Repositories ─────────────────────────────────────────────────────────
+    - name: Assert Alpine community repo is configured
+      ansible.builtin.command: grep -q "community" /etc/apk/repositories
+      changed_when: false
+
+    # ── cloud-init ────────────────────────────────────────────────────────────
+    - name: Assert cloud-init is installed
+      ansible.builtin.command: which cloud-init
+      changed_when: false
+
+    - name: Assert cloud-init OCI config is present
+      ansible.builtin.stat:
+        path: /etc/cloud/cloud.cfg.d/90_oracle.cfg
+      register: common_oci_cfg
+      failed_when: not common_oci_cfg.stat.exists
+
+    - name: Assert OCI datasource is configured
+      ansible.builtin.command: grep -q "Oracle" /etc/cloud/cloud.cfg.d/90_oracle.cfg
+      changed_when: false
+
+    - name: Assert cloud-init services are in default runlevel
+      ansible.builtin.stat:
+        path: "/etc/runlevels/default/{{ item }}"
+      register: common_ci_svc
+      failed_when: not common_ci_svc.stat.exists
+      loop:
+        - cloud-init-local
+        - cloud-init
+        - cloud-config
+        - cloud-final
+
+    # ── SSH / clock ───────────────────────────────────────────────────────────
+    - name: Assert sshd is enabled in default runlevel
+      ansible.builtin.stat:
+        path: /etc/runlevels/default/sshd
+      register: common_sshd_runlevel
+      failed_when: not common_sshd_runlevel.stat.exists
+
+    - name: Assert chronyd is enabled in default runlevel
+      ansible.builtin.stat:
+        path: /etc/runlevels/default/chronyd
+      register: common_chronyd_runlevel
+      failed_when: not common_chronyd_runlevel.stat.exists
+
+    # ── otelcol-contrib ───────────────────────────────────────────────────────
+    - name: Assert otelcol-contrib binary is present
+      ansible.builtin.stat:
+        path: /usr/local/bin/otelcol-contrib
+      register: common_otelcol_bin
+      failed_when: not common_otelcol_bin.stat.exists
+
+    - name: Assert otelcol-contrib binary is executable
+      ansible.builtin.stat:
+        path: /usr/local/bin/otelcol-contrib
+      register: common_otelcol_exec
+      failed_when: not common_otelcol_exec.stat.executable
+
+    - name: Assert otelcol-contrib init script is present
+      ansible.builtin.stat:
+        path: /etc/init.d/otelcol-contrib
+      register: common_otelcol_init
+      failed_when: not common_otelcol_init.stat.exists
+
+    - name: Assert otelcol-contrib user exists
+      ansible.builtin.command: id otelcol-contrib
+      changed_when: false
+
+    - name: Assert otelcol-contrib filestore directory exists
+      ansible.builtin.stat:
+        path: /var/lib/otelcol-contrib/filestore
+      register: common_otelcol_filestore
+      failed_when: not common_otelcol_filestore.stat.exists
+
+    - name: Assert otelcol-contrib is enabled in default runlevel
+      ansible.builtin.stat:
+        path: /etc/runlevels/default/otelcol-contrib
+      register: common_otelcol_runlevel
+      failed_when: not common_otelcol_runlevel.stat.exists
+
+    # ── APK cache ─────────────────────────────────────────────────────────────
+    - name: Assert APK cache is empty (image size reduction)
+      ansible.builtin.find:
+        paths: /var/cache/apk
+        file_type: file
+      register: common_apk_cache
+      failed_when: common_apk_cache.matched > 0
+
+    # ── Common packages ───────────────────────────────────────────────────────
+    - name: Assert common packages are installed
+      ansible.builtin.command: "which {{ item }}"
+      changed_when: false
+      loop:
+        - curl
+        - wget
+        - unzip

@@ -1,20 +1,24 @@
 ---
 # Alpine repository mirror — "latest-stable" always resolves to the current release.
-base_alpine_repo_base: "https://dl-cdn.alpinelinux.org/alpine/latest-stable"
+common_alpine_repo_base: "https://dl-cdn.alpinelinux.org/alpine/latest-stable"
 
-# Extra packages to include in the base image.
-base_packages:
+# Packages installed on every VM.
+common_packages:
+  - curl
   - wget
   - unzip
   - chrony
   - openssh
 
 # cloud-init OCI datasource — Oracle is preferred; ConfigDrive and NoCloud as fallback.
-base_cloud_init_datasources:
+common_cloud_init_datasources:
   - Oracle
   - ConfigDrive
   - NoCloud
   - None
 
 # cloud-init log format: json ensures structured logging per service conventions.
-base_cloud_init_log_format: json
+common_cloud_init_log_format: json
+
+# otelcol-contrib release to install.
+common_otelcol_version: "0.131.0"

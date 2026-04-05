@@ -1,0 +1,44 @@
+---
+# Local LGTM development stack using the Grafana all-in-one image.
+# Bundles: OpenTelemetry Collector, Prometheus, Loki, Tempo, Pyroscope, Grafana.
+# https://github.com/grafana/docker-otel-lgtm
+#
+# Grafana:       http://localhost:3000  (anonymous admin, no login required)
+# OTLP gRPC:     localhost:4317
+# OTLP HTTP:     localhost:4318
+# Prometheus:    http://localhost:9090
+#
+# Log files written to ./logs/ are automatically ingested by the filelog
+# receiver and forwarded to Loki — searchable in Grafana under service=make.
+
+services:
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: dev-lgtm
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # Grafana UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "4040:4040"   # OTel Collector pprof
+      - "9090:9090"   # Prometheus
+    environment:
+      # Anonymous auth — admin role, no login required for local debugging.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_LOG_MODE: console
+      GF_LOG_CONSOLE_FORMAT: json
+      ENABLE_LOGS_ALL: "true"
+      # Load the extra otelcol config (filelog receiver for ./logs/).
+      OTELCOL_EXTRA_ARGS: "--config=file:/etc/otelcol/extra.yaml"
+    volumes:
+      # Extra otelcol config — filelog receiver reading from /dev/logs/.
+      - ./otelcol-extra.yaml:/etc/otelcol/extra.yaml:ro
+      # Shared log directory — make recipes tee output here, otelcol reads it.
+      - ./logs:/dev/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

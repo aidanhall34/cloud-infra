@@ -27,8 +27,8 @@ locals {
   # Grafana GitHub OAuth credentials.
   # If the file still contains the placeholder comment (starts with #),
   # returns "" — Grafana will start but GitHub OAuth will be inactive.
-  _grafana_client_id_raw     = trimspace(file("${path.root}/../secrets/grafana_github_client_id"))
-  _grafana_client_secret_raw = trimspace(file("${path.root}/../secrets/grafana_github_client_secret"))
+  _grafana_client_id_raw       = trimspace(file("${path.root}/../secrets/grafana_github_client_id"))
+  _grafana_client_secret_raw   = trimspace(file("${path.root}/../secrets/grafana_github_client_secret"))
   grafana_github_client_id     = sensitive(startswith(local._grafana_client_id_raw, "#") ? "" : local._grafana_client_id_raw)
   grafana_github_client_secret = sensitive(startswith(local._grafana_client_secret_raw, "#") ? "" : local._grafana_client_secret_raw)
 

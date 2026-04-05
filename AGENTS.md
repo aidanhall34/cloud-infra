@@ -14,10 +14,12 @@
 # Service conventions
 
 - All services should be deploy with JSON logging enabled.
+- Services should log to the ./dev/logs directory
 
 # Command execution conventions
 
 - Commands should be run with JSON output
+- Commands should log to the ./dev/logs directory
 
 # Python conventions
 
@@ -43,3 +45,7 @@
 
 - Packer should be validated with `make packer-validate` when changed
 - Packer should be formatted with `make packer-fmt`
+
+# Container conventions
+
+- Containers should log to the ./dev/logs directory

@@ -1,0 +1,14 @@
+---
+# Blocky DNS release to install.
+gateway_blocky_version: "0.29.0"
+
+# Packages installed on the gateway image.
+gateway_packages:
+  - wireguard-tools
+  - nginx
+  - bash
+  - iptables
+  - libcap
+  # certbot and the nginx plugin are in the community repo
+  - certbot
+  - py3-certbot-nginx

@@ -4,15 +4,15 @@
 - name: Enable Alpine main repository
   ansible.builtin.lineinfile:
     path: /etc/apk/repositories
-    regexp: "^#?{{ base_alpine_repo_base }}/main"
-    line: "{{ base_alpine_repo_base }}/main"
+    regexp: "^#?{{ common_alpine_repo_base }}/main"
+    line: "{{ common_alpine_repo_base }}/main"
     state: present
 
-- name: Enable Alpine community repository (required for cloud-init)
+- name: Enable Alpine community repository
   ansible.builtin.lineinfile:
     path: /etc/apk/repositories
-    regexp: "^#?{{ base_alpine_repo_base }}/community"
-    line: "{{ base_alpine_repo_base }}/community"
+    regexp: "^#?{{ common_alpine_repo_base }}/community"
+    line: "{{ common_alpine_repo_base }}/community"
     state: present
 
 # ── Packages ───────────────────────────────────────────────────────────────────
@@ -25,14 +25,14 @@
   community.general.apk:
     upgrade: true
 
-- name: Install base packages
+- name: Install common packages
   community.general.apk:
-    name: "{{ base_packages }}"
+    name: "{{ common_packages }}"
     state: latest
 
 # ── cloud-init (latest) ────────────────────────────────────────────────────────
 
-- name: Install cloud-init (latest available in community repo)
+- name: Install cloud-init
   community.general.apk:
     name: cloud-init
     state: latest
@@ -55,15 +55,13 @@
     content: |
       # OCI datasource configuration — applied during Packer base image build.
       # Oracle datasource reads instance metadata from the OCI IMDS endpoint.
-      datasource_list: {{ base_cloud_init_datasources | to_json }}
+      datasource_list: {{ common_cloud_init_datasources | to_json }}
 
       datasource:
         Oracle:
-          # Retry fetching IMDS metadata up to 10 times on first boot.
           max_wait: 120
           timeout: 30
 
-      # JSON structured logging to stdout — aligns with service logging convention.
       output:
         all: "| tee -a /var/log/cloud-init-output.log"
 
@@ -76,7 +74,7 @@
         handlers:
           console:
             class: logging.StreamHandler
-            formatter: "{{ base_cloud_init_log_format }}"
+            formatter: "{{ common_cloud_init_log_format }}"
             stream: ext://sys.stdout
         root:
           level: DEBUG
@@ -86,14 +84,12 @@
   ansible.builtin.lineinfile:
     path: /etc/cloud/cloud.cfg
     regexp: "^datasource_list:"
-    line: "datasource_list: {{ base_cloud_init_datasources | to_json }}"
+    line: "datasource_list: {{ common_cloud_init_datasources | to_json }}"
     state: present
 
-# ── SSH hardening ──────────────────────────────────────────────────────────────
-# Final SSH lockdown is applied by Packer's shell provisioner after Ansible
-# finishes, so cloud-init can inject the authorised key on first boot.
+# ── SSH ────────────────────────────────────────────────────────────────────────
 
-- name: Ensure SSHD is enabled at boot
+- name: Ensure sshd is enabled at boot
   rc_update:
     name: sshd
     runlevel: default
@@ -107,9 +103,76 @@
     runlevel: default
     state: present
 
+# ── otelcol-contrib ────────────────────────────────────────────────────────────
+# Downloads the pre-built binary tarball (no .deb on Alpine).
+# Alpine reports arch as x86_64 / aarch64; release assets use amd64 / arm64.
+
+- name: Map Alpine arch to otelcol release arch
+  ansible.builtin.set_fact:
+    common_otelcol_arch: >-
+      {{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+
+- name: Create otelcol-contrib user
+  ansible.builtin.user:
+    name: otelcol-contrib
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+    state: present
+
+- name: Create otelcol-contrib directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: otelcol-contrib
+    group: otelcol-contrib
+    mode: "0755"
+  loop:
+    - /etc/otelcol-contrib
+    - /var/lib/otelcol-contrib/filestore
+
+- name: Download otelcol-contrib tarball
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{
+      common_otelcol_version }}/otelcol-contrib_{{ common_otelcol_version }}_linux_{{
+      common_otelcol_arch }}.tar.gz
+    dest: /tmp/otelcol-contrib.tar.gz
+    mode: "0644"
+
+- name: Extract otelcol-contrib binary
+  ansible.builtin.unarchive:
+    src: /tmp/otelcol-contrib.tar.gz
+    dest: /usr/local/bin
+    include:
+      - otelcol-contrib
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Remove otelcol-contrib tarball
+  ansible.builtin.file:
+    path: /tmp/otelcol-contrib.tar.gz
+    state: absent
+
+- name: Install otelcol-contrib OpenRC init script
+  ansible.builtin.template:
+    src: otelcol-contrib.init.j2
+    dest: /etc/init.d/otelcol-contrib
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable otelcol-contrib at boot
+  rc_update:
+    name: otelcol-contrib
+    runlevel: default
+    state: present
+
 # ── Clean up ──────────────────────────────────────────────────────────────────
 
-- name: Remove APK cache directory to reduce image size
+- name: Remove APK cache to reduce image size
   ansible.builtin.file:
     path: /var/cache/apk
     state: absent

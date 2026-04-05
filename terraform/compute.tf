@@ -1,16 +1,8 @@
 # --- Image lookup ---
-# Auto-selects the latest Ubuntu 24.04 Minimal from the Oracle marketplace.
-# Override with gateway_image_ocid / telemetry_image_ocid variables if needed.
-
-data "oci_core_images" "ubuntu_amd64" {
-  compartment_id           = var.compartment_ocid
-  operating_system         = "Canonical Ubuntu"
-  operating_system_version = "24.04 Minimal"
-  shape                    = "VM.Standard.E2.1.Micro"
-  sort_by                  = "TIMECREATED"
-  sort_order               = "DESC"
-  state                    = "AVAILABLE"
-}
+# gateway: requires a custom Alpine image built with packer/gateway.pkr.hcl.
+#          Set gateway_image_ocid to the OCID returned by `make packer-build-gateway`.
+# telemetry: auto-selects the latest Ubuntu 24.04 Minimal (ARM64) from the marketplace,
+#            or use telemetry_image_ocid to pin a specific version.
 
 data "oci_core_images" "ubuntu_arm64" {
   compartment_id           = var.compartment_ocid
@@ -23,7 +15,8 @@ data "oci_core_images" "ubuntu_arm64" {
 }
 
 locals {
-  gateway_image_id   = var.gateway_image_ocid != "" ? var.gateway_image_ocid : data.oci_core_images.ubuntu_amd64.images[0].id
+  # gateway_image_id uses the custom Alpine Packer image — no Ubuntu fallback.
+  gateway_image_id   = var.gateway_image_ocid
   telemetry_image_id = var.telemetry_image_ocid != "" ? var.telemetry_image_ocid : data.oci_core_images.ubuntu_arm64.images[0].id
 
   # OCI VCN internal DNS hostnames — stable across instance replacements
@@ -50,9 +43,7 @@ data "cloudinit_config" "gateway" {
   part {
     filename     = "common.yaml"
     content_type = "text/cloud-config"
-    content = templatefile("${path.module}/cloud-init/common.yaml.tpl", {
-      otelcol_version = var.otelcol_version
-    })
+    content      = file("${path.module}/cloud-init/common.yaml.tpl")
   }
 
   part {
@@ -61,12 +52,10 @@ data "cloudinit_config" "gateway" {
     merge_type   = "list(append)+dict(recurse_array)+str()"
     content = templatefile("${path.module}/cloud-init/gateway.yaml.tpl", {
       telemetry_hostname            = local.telemetry_internal_hostname
-      wireguard_subnet              = var.wireguard_subnet
       wireguard_port                = var.wireguard_port
       wireguard_private_key         = local.wireguard_private_key
       wireguard_mikrotik_public_key = local.wireguard_mikrotik_public_key
       static_site_domain            = var.static_site_domain
-      blocky_version                = var.blocky_version
       blocky_adlists                = file("${path.module}/../config/dns/adlists.txt")
       blocky_allowlist              = file("${path.module}/../config/dns/allowlist.txt")
       blocky_local_dns              = file("${path.module}/../config/dns/local_dns.txt")
@@ -81,9 +70,7 @@ data "cloudinit_config" "telemetry" {
   part {
     filename     = "common.yaml"
     content_type = "text/cloud-config"
-    content = templatefile("${path.module}/cloud-init/common.yaml.tpl", {
-      otelcol_version = var.otelcol_version
-    })
+    content      = file("${path.module}/cloud-init/common.yaml.tpl")
   }
 
   part {

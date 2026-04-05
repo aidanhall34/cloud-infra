@@ -1,0 +1,47 @@
+# Extra otelcol-contrib configuration loaded alongside the built-in LGTM config.
+# Adds a filelog receiver that tails make recipe output from /dev/logs/.
+# Loaded via OTELCOL_EXTRA_ARGS="--config=file:/etc/otelcol/extra.yaml".
+#
+# Verified against otelcol-contrib 0.147.0 (bundled in grafana/otel-lgtm:latest).
+# otelcol configs have no version field — component versions are set at build time.
+
+receivers:
+  filelog/make:
+    include:
+      - /dev/logs/*.log
+    # Read from beginning so logs written before the container starts are ingested.
+    start_at: beginning
+    poll_interval: 2s
+    # log.file.name attribute carries the recipe name (e.g. "ansible-lint.log").
+    include_file_name: true
+    include_file_path: false
+    operators:
+      # Try to parse each line as JSON (ansible-lint, packer, etc. emit JSON).
+      # on_error: send passes non-JSON lines through as plain-text body records.
+      - type: json_parser
+        on_error: send
+
+processors:
+  resource/make:
+    attributes:
+      - key: service.name
+        value: make
+        action: insert
+  batch/make:
+    timeout: 5s
+
+exporters:
+  # Loki runs at localhost inside the grafana/otel-lgtm container.
+  otlphttp/loki_make:
+    endpoint: http://localhost:3100/otlp
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    # logs/make is a distinct pipeline; it does not conflict with the built-in
+    # "logs" pipeline that handles OTLP-pushed logs.
+    logs/make:
+      receivers: [filelog/make]
+      processors: [resource/make, batch/make]
+      exporters: [otlphttp/loki_make]

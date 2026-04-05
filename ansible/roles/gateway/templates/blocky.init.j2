@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+# OpenRC init script for Blocky DNS ad-blocker.
+# Config is written by blocky-generate-config.sh in cloud-init.
+
+description="Blocky DNS ad-blocker"
+
+command=/usr/local/bin/blocky
+command_args="--config /etc/blocky/config.yaml"
+command_user="blocky:blocky"
+command_background=true
+pidfile=/run/blocky.pid
+output_log=/var/log/blocky.log
+error_log=/var/log/blocky.log
+
+depend() {
+    need net
+    after cloud-final
+}
