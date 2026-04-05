@@ -33,7 +33,6 @@ ssh_public_key = "ssh-ed25519 AAAA... user@host"
 # ── Optional overrides ────────────────────────────────────────────────────────
 
 # Public domain for the static site. Leave empty to skip TLS provisioning.
-# static_site_domain = "example.com"
 
 # If ARM capacity is unavailable in AD 0, try index 1 or 2.
 # availability_domain_index = 0

@@ -32,12 +32,10 @@ provisioner:
       all:
         ansible_python_interpreter: /usr/bin/python3
 
-# molecule 26: env and config moved out of provisioner into top-level ansible key
-ansible:
   env:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
     ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/../../library"
-    ANSIBLE_STDOUT_CALLBACK: json
+    ANSIBLE_CONFIG: "${MOLECULE_PROJECT_DIRECTORY}/../../ansible.cfg"
 
 verifier:
   name: ansible

@@ -112,9 +112,16 @@
     common_otelcol_arch: >-
       {{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
 
+- name: Create otelcol-contrib group
+  ansible.builtin.group:
+    name: otelcol-contrib
+    system: true
+    state: present
+
 - name: Create otelcol-contrib user
   ansible.builtin.user:
     name: otelcol-contrib
+    group: otelcol-contrib
     system: true
     shell: /sbin/nologin
     create_home: false
@@ -169,6 +176,20 @@
     name: otelcol-contrib
     runlevel: default
     state: present
+
+- name: Deploy default otelcol-contrib config (skipped if cloud-init config already present)
+  ansible.builtin.copy:
+    src: otelcol-contrib-default.yaml
+    dest: /etc/otelcol-contrib/config.yaml
+    owner: otelcol-contrib
+    group: otelcol-contrib
+    mode: "0640"
+    force: false
+
+- name: Validate otelcol-contrib config
+  ansible.builtin.command:
+    cmd: /usr/local/bin/otelcol-contrib validate --config=file:/etc/otelcol-contrib/config.yaml
+  changed_when: false
 
 # ── Clean up ──────────────────────────────────────────────────────────────────
 

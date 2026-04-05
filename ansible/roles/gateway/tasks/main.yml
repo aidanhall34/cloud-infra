@@ -54,9 +54,16 @@
     gateway_blocky_arch: >-
       {{ 'arm64' if ansible_architecture == 'aarch64' else 'x86_64' }}
 
+- name: Create blocky group
+  ansible.builtin.group:
+    name: blocky
+    system: true
+    state: present
+
 - name: Create blocky system user
   ansible.builtin.user:
     name: blocky
+    group: blocky
     system: true
     shell: /sbin/nologin
     create_home: false
@@ -113,29 +120,17 @@
     runlevel: default
     state: present
 
-# ── Nginx ─────────────────────────────────────────────────────────────────────
-# Alpine Nginx uses /etc/nginx/http.d/ (not sites-available/enabled).
-# The site config is written by cloud-init; Nginx is already enabled by the
-# package install hook — just make sure it starts at boot.
+- name: Deploy default blocky config (skipped if cloud-init config already present)
+  ansible.builtin.copy:
+    src: blocky-default.yaml
+    dest: /etc/blocky/config.yaml
+    owner: blocky
+    group: blocky
+    mode: "0640"
+    force: false
 
-- name: Create Nginx http.d directory
-  ansible.builtin.file:
-    path: /etc/nginx/http.d
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
+- name: Validate blocky config
+  ansible.builtin.command:
+    cmd: /usr/local/bin/blocky validate -c /etc/blocky/config.yaml
+  changed_when: false
 
-- name: Create webroot directory
-  ansible.builtin.file:
-    path: /var/www/homelab
-    state: directory
-    owner: nginx
-    group: nginx
-    mode: "0755"
-
-- name: Enable Nginx at boot
-  rc_update:
-    name: nginx
-    runlevel: default
-    state: present

@@ -225,7 +225,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install Python dependencies
-        run: uv pip install --system -r scripts/requirements.txt
+        run: cd scripts/ && uv sync
 
       - name: Run OAuth end-to-end flow test
         run: |

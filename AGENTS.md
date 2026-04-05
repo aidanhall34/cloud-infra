@@ -48,4 +48,8 @@
 
 # Container conventions
 
-- Containers should log to the ./dev/logs directory
+- Containers should log to the ./dev/logs directory.
+
+# Coding conventions
+
+- Code should be `dry`. Where possible, link to files and modules instead of copying.

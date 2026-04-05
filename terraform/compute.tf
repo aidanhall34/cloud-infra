@@ -55,7 +55,6 @@ data "cloudinit_config" "gateway" {
       wireguard_port                = var.wireguard_port
       wireguard_private_key         = local.wireguard_private_key
       wireguard_mikrotik_public_key = local.wireguard_mikrotik_public_key
-      static_site_domain            = var.static_site_domain
       blocky_adlists                = file("${path.module}/../config/dns/adlists.txt")
       blocky_allowlist              = file("${path.module}/../config/dns/allowlist.txt")
       blocky_local_dns              = file("${path.module}/../config/dns/local_dns.txt")

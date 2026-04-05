@@ -56,18 +56,6 @@
       register: gateway_wg_dir
       failed_when: not gateway_wg_dir.stat.exists or gateway_wg_dir.stat.mode != "0700"
 
-    - name: Assert Nginx http.d directory exists
-      ansible.builtin.stat:
-        path: /etc/nginx/http.d
-      register: gateway_nginx_httpd
-      failed_when: not gateway_nginx_httpd.stat.exists
-
-    - name: Assert Nginx is enabled in default runlevel
-      ansible.builtin.stat:
-        path: /etc/runlevels/default/nginx
-      register: gateway_nginx_runlevel
-      failed_when: not gateway_nginx_runlevel.stat.exists
-
     - name: Assert IP forwarding is set in sysctl.conf
       ansible.builtin.command: grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf
       changed_when: false
@@ -78,7 +66,6 @@
         state: present
       loop:
         - wireguard-tools
-        - nginx
         - bash
         - iptables
         - libcap

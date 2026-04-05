@@ -98,14 +98,6 @@ variable "telemetry_image_ocid" {
   default     = ""
 }
 
-# --- Application ---
-
-variable "static_site_domain" {
-  description = "Domain name for the public static site (e.g. example.com). Used for Nginx server_name and certbot. Set to empty string to skip TLS provisioning."
-  type        = string
-  default     = ""
-}
-
 # Secrets are read from the secrets/ directory in secrets.tf — not variables.
 # For CI/CD, write secret files before running terraform:
 #   echo "$SECRET" > ../secrets/<filename>

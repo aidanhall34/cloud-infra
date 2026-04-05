@@ -7,6 +7,7 @@ common_packages:
   - curl
   - wget
   - unzip
+  - tar       # GNU tar — required by ansible.builtin.unarchive (BusyBox tar is not supported)
   - chrony
   - openssh
 

@@ -13,8 +13,70 @@ packer {
   }
 }
 
+# ── Variables ─────────────────────────────────────────────────────────────────
+
+variable "alpine_version" {
+  description = "Alpine Linux version to build (major.minor.patch)"
+  type        = string
+  default     = "3.21.3"
+}
+
+variable "alpine_arch" {
+  description = "Target CPU architecture"
+  type        = string
+  default     = "x86_64"
+}
+
+variable "disk_size" {
+  description = "Disk size for the image in MiB"
+  type        = number
+  default     = 4096
+}
+
+variable "memory" {
+  description = "RAM for the QEMU build VM in MiB"
+  type        = number
+  default     = 512
+}
+
+variable "cpus" {
+  description = "CPUs for the QEMU build VM"
+  type        = number
+  default     = 2
+}
+
+variable "ssh_password" {
+  description = "Temporary root password used by Packer during the build — not present in the final image"
+  type        = string
+  default     = "packer"
+  sensitive   = true
+}
+
+variable "oci_namespace" {
+  description = "OCI Object Storage namespace (tenancy namespace)"
+  type        = string
+}
+
+variable "oci_bucket" {
+  description = "OCI Object Storage bucket to upload the image to"
+  type        = string
+  default     = "packer-images"
+}
+
+variable "oci_compartment_ocid" {
+  description = "OCI compartment OCID where the custom image will be registered"
+  type        = string
+}
+
+variable "oci_region" {
+  description = "OCI region"
+  type        = string
+  default     = "ap-sydney-1"
+}
+
+# ── Locals ────────────────────────────────────────────────────────────────────
+
 locals {
-  # Alpine minor version derived from full version string e.g. "3.21.3" → "3.21"
   alpine_minor = join(".", slice(split(".", var.alpine_version), 0, 2))
 
   iso_url      = "https://dl-cdn.alpinelinux.org/alpine/v${local.alpine_minor}/releases/${var.alpine_arch}/alpine-virt-${var.alpine_version}-${var.alpine_arch}.iso"
@@ -50,7 +112,7 @@ source "qemu" "alpine" {
   ssh_handshake_attempts = 50
 
   # Serve the answer file via Packer's built-in HTTP server.
-  http_directory = "${path.root}/http"
+  http_directory = "${path.root}/../http"
 
   # ── Boot sequence ──────────────────────────────────────────────────────────
   # 1. Login to Alpine live environment (no password in virt ISO)
@@ -85,7 +147,7 @@ build {
 
   # Run Ansible to install and configure cloud-init (latest) and harden the base image.
   provisioner "ansible" {
-    playbook_file = "${path.root}/../ansible/playbook.yml"
+    playbook_file = "${path.root}/../../ansible/playbook.yml"
     user          = "root"
     extra_arguments = [
       "--connection=ssh",
@@ -113,6 +175,6 @@ build {
       "OCI_COMPARTMENT_OCID=${var.oci_compartment_ocid}",
       "OCI_REGION=${var.oci_region}",
     ]
-    script = "${path.root}/scripts/upload-to-oci.sh"
+    script = "${path.root}/../scripts/upload-to-oci.sh"
   }
 }

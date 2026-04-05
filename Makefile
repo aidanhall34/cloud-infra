@@ -21,6 +21,14 @@ SCRIPTS_DIR := scripts
 ANSIBLE_DIR := ansible
 DEV_DIR     := dev
 
+# grafana/otel-lgtm image version — otelcol and prometheus are bundled inside it.
+# Run `make otelcol-validate` and `make prometheus-validate` after upgrading.
+LGTM_VERSION       := 0.23.0
+export LGTM_VERSION
+OTELCOL_VERSION    := 0.147.0   # bundled in grafana/otel-lgtm:$(LGTM_VERSION)
+PROMETHEUS_VERSION := 3.10.0    # bundled in grafana/otel-lgtm:$(LGTM_VERSION)
+BLOCKY_VERSION     := 0.29.0
+
 # act: use the medium-sized runner image and pass the GitHub token.
 # Override GITHUB_TOKEN in the environment before running CI targets.
 ACT_FLAGS   := --platform ubuntu-latest=catthehacker/ubuntu:act-latest \
@@ -46,33 +54,38 @@ help: ## Show this help message
 
 ## Terraform — local
 
-.PHONY: init
-init: ## Initialise Terraform with the local secrets/backend.hcl
+.PHONY: tf-init
+tf-init: ## Initialise Terraform with the local secrets/backend.hcl
 	@mkdir -p $(LOG_DIR)
 	{ cd $(TF_DIR) && terraform init -backend-config=../$(SECRETS_DIR)/backend.hcl; } $(L)
 
-.PHONY: plan
-plan: ## Run terraform plan (writes plan to /tmp/tfplan.binary)
+.PHONY: tf-plan
+tf-plan: ## Run terraform plan (writes plan to /tmp/tfplan.binary)
 	@mkdir -p $(LOG_DIR)
 	{ cd $(TF_DIR) && terraform plan -out=/tmp/tfplan.binary; } $(L)
 
-.PHONY: apply
-apply: ## Apply the last plan produced by `make plan`
+.PHONY: tf-apply
+tf-apply: ## Apply the last plan produced by `make plan`
 	@mkdir -p $(LOG_DIR)
 	{ cd $(TF_DIR) && terraform apply /tmp/tfplan.binary; } $(L)
 
-.PHONY: destroy
-destroy: ## Destroy all managed infrastructure (prompts for confirmation)
+.PHONY: tf-destroy
+tf-destroy: ## Destroy all managed infrastructure (prompts for confirmation)
 	@mkdir -p $(LOG_DIR)
 	{ cd $(TF_DIR) && terraform destroy; } $(L)
 
-.PHONY: fmt
-fmt: ## Run terraform fmt recursively
+.PHONY: tf-fmt
+tf-fmt: ## Run terraform fmt recursively
 	@mkdir -p $(LOG_DIR)
 	{ cd $(TF_DIR) && terraform fmt -recursive; } $(L)
 
-.PHONY: validate
-validate: ## Run terraform validate
+.PHONY: tf-lint
+tf-lint: ## Check Terraform formatting without modifying files (no provider init required)
+	@mkdir -p $(LOG_DIR)
+	{ cd $(TF_DIR) && terraform fmt -check -recursive; } $(L)
+
+.PHONY: tf-validate
+tf-validate: ## Run terraform validate (requires terraform init first)
 	@mkdir -p $(LOG_DIR)
 	{ cd $(TF_DIR) && terraform validate; } $(L)
 
@@ -166,10 +179,21 @@ test-clean: ## Remove all test containers left over from a local test run
 	@mkdir -p $(LOG_DIR)
 	{ docker rm -f testenv minio 2>/dev/null || true; } $(L)
 
-## Python linting
+## Setup
+
+.PHONY: setup
+setup: ## Install all Python dependencies (ansible/ and scripts/ virtual environments)
+	@mkdir -p $(LOG_DIR)
+	{ cd $(ANSIBLE_DIR) && uv sync; } $(L)
+	{ cd $(SCRIPTS_DIR) && uv sync; } $(L)
+
+## Linting
 
 .PHONY: lint
-lint: ## Lint all Python code with ruff
+lint: lint-python ansible-lint tf-lint packer-validate otelcol-validate prometheus-validate blocky-validate ## Run all linters and validators (tf-validate excluded: requires terraform init)
+
+.PHONY: lint-python
+lint-python: ## Lint all Python code with ruff (scripts/ and ansible/)
 	@mkdir -p $(LOG_DIR)
 	{ cd $(SCRIPTS_DIR) && uv run ruff check .; } $(L)
 	{ cd $(ANSIBLE_DIR) && uv run ruff check .; } $(L)
@@ -220,37 +244,81 @@ ansible-doc: ## Generate documentation for all custom Ansible modules into docs/
 ## Packer — image builds
 
 .PHONY: packer-init
-packer-init: ## Initialise Packer plugins (run once after checkout)
+packer-init: ## Initialise Packer plugins for all builds (run once after checkout)
 	@mkdir -p $(LOG_DIR)
-	{ cd packer && packer init .; } $(L)
+	{ cd packer/alpine && packer init .; } $(L)
+	{ cd packer/gateway && packer init .; } $(L)
 
 .PHONY: packer-build
 packer-build: ## Build the Alpine base image and upload it to OCI
 	@mkdir -p $(LOG_DIR)
-	{ cd packer && packer build -var-file=alpine.pkrvars.hcl alpine.pkr.hcl; } $(L)
+	{ cd packer/alpine && packer build -var-file=vars.pkrvars.hcl .; } $(L)
 
 .PHONY: packer-build-gateway
 packer-build-gateway: ## Build the Alpine gateway image (WireGuard, Blocky, Nginx) and upload it to OCI
 	@mkdir -p $(LOG_DIR)
-	{ cd packer && packer build -var-file=gateway.pkrvars.hcl gateway.pkr.hcl; } $(L)
+	{ cd packer/gateway && packer build -var-file=vars.pkrvars.hcl .; } $(L)
 
 .PHONY: packer-validate
 packer-validate: ## Validate all Packer configurations without building
 	@mkdir -p $(LOG_DIR)
-	{ cd packer && packer validate -var-file=alpine.pkrvars.hcl alpine.pkr.hcl; } $(L)
-	{ cd packer && packer validate -var-file=gateway.pkrvars.hcl gateway.pkr.hcl; } $(L)
+	{ cd packer/alpine && packer validate -var-file=vars.pkrvars.hcl .; } $(L)
+	{ cd packer/gateway && packer validate -var-file=vars.pkrvars.hcl .; } $(L)
 
 .PHONY: packer-fmt
-packer-fmt: ## Format Packer configuration
+packer-fmt: ## Format Packer configuration (all builds)
 	@mkdir -p $(LOG_DIR)
-	{ cd packer && packer fmt .; } $(L)
+	{ cd packer && packer fmt -recursive .; } $(L)
 
 ## Development
+
+.PHONY: dev-secrets
+dev-secrets: ## Generate dev Grafana admin credentials (secrets/dev-grafana.env) — skips if already present
+	@mkdir -p $(SECRETS_DIR)
+	{ if [ -f $(SECRETS_DIR)/dev-grafana.env ]; then \
+	    echo "$(SECRETS_DIR)/dev-grafana.env already exists — delete it to regenerate."; \
+	  else \
+	    password=$$(openssl rand -hex 16); \
+	    printf 'GF_SECURITY_ADMIN_PASSWORD=%s\nGRAFANA_URL=http://admin:%s@lgtm:3000\n' \
+	        "$$password" "$$password" > $(SECRETS_DIR)/dev-grafana.env; \
+	    chmod 600 $(SECRETS_DIR)/dev-grafana.env; \
+	    echo "Generated $(SECRETS_DIR)/dev-grafana.env"; \
+	  fi; } $(L)
+
+.PHONY: otelcol-validate
+otelcol-validate: ## Validate otelcol configs against otelcol-contrib $(OTELCOL_VERSION) (bundled in grafana/otel-lgtm)
+	@mkdir -p $(LOG_DIR)
+	{ docker run --rm \
+		-v "$(CURDIR)/$(DEV_DIR)/otelcol-extra.yaml:/etc/otelcol/extra.yaml:ro" \
+		--entrypoint="" \
+		grafana/otel-lgtm:$(LGTM_VERSION) \
+		/otel-lgtm/otelcol-contrib/otelcol-contrib validate \
+			--feature-gates service.profilesSupport \
+			--config=file:/otel-lgtm/otelcol-config.yaml \
+			--config=file:/etc/otelcol/extra.yaml; } $(L)
+
+.PHONY: blocky-validate
+blocky-validate: ## Validate blocky config with blocky v$(BLOCKY_VERSION)
+	@mkdir -p $(LOG_DIR)
+	{ docker run --rm \
+		-v "$(CURDIR)/$(ANSIBLE_DIR)/roles/gateway/files/blocky-default.yaml:/etc/blocky/config.yaml:ro" \
+		ghcr.io/0xerr0r/blocky:v$(BLOCKY_VERSION) \
+		validate -c /etc/blocky/config.yaml; } $(L)
+
+.PHONY: prometheus-validate
+prometheus-validate: ## Validate prometheus config with promtool $(PROMETHEUS_VERSION) (bundled in grafana/otel-lgtm)
+	@mkdir -p $(LOG_DIR)
+	{ docker run --rm \
+		-v "$(CURDIR)/$(DEV_DIR)/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro" \
+		--entrypoint="" \
+		grafana/otel-lgtm:$(LGTM_VERSION) \
+		/otel-lgtm/prometheus/promtool check config \
+			/etc/prometheus/prometheus.yaml; } $(L)
 
 .PHONY: dev-up
 dev-up: ## Start the local LGTM development stack (Grafana on :3000, anonymous admin)
 	@mkdir -p $(LOG_DIR)
-	{ docker compose -f $(DEV_DIR)/docker-compose.yml up -d; } $(L)
+	{ docker compose -f $(DEV_DIR)/docker-compose.yml up -d --wait ; } $(L)
 
 .PHONY: dev-down
 dev-down: ## Stop and remove the local LGTM development stack
@@ -277,3 +345,4 @@ build: ## Build the scripts container image (aidanhall34/homelab:latest)
 readme: ## Regenerate README.md from README.md.tpl and Makefile comments
 	@mkdir -p $(LOG_DIR)
 	{ uv run --python 3.13 $(SCRIPTS_DIR)/generate-readme.py; } $(L)
+

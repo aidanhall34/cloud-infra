@@ -1,47 +1,152 @@
 # Extra otelcol-contrib configuration loaded alongside the built-in LGTM config.
-# Adds a filelog receiver that tails make recipe output from /dev/logs/.
 # Loaded via OTELCOL_EXTRA_ARGS="--config=file:/etc/otelcol/extra.yaml".
+# Verified against otelcol-contrib 0.147.0 (grafana/otel-lgtm:latest).
+# otelcol configs have no top-level version field.
 #
-# Verified against otelcol-contrib 0.147.0 (bundled in grafana/otel-lgtm:latest).
-# otelcol configs have no version field — component versions are set at build time.
+# Adds:
+#   • health_check extension on :13133
+#   • logs/make  — filelog receiver tailing dev/logs/*.log → Loki
+#   • traces/spanmetrics — fan-out from the built-in otlp receiver, generates RED metrics
+#   • metrics/spanmetrics — spanmetrics connector output → Prometheus
+#   • service.telemetry.logs — otelcol writes its own structured logs to /dev/logs/otelcol.log
+#     which the filelog/make receiver then ingests (*.log glob covers it automatically)
+#   • service.telemetry.metrics.level: detailed — full otelcol self-metrics at :8888
+
+# ── Receivers ─────────────────────────────────────────────────────────────────
 
 receivers:
-  filelog/make:
+  # Explicit OTLP receiver declaration — mirrors the built-in config endpoints.
+  # Declaring it here makes the extra config self-documenting and allows the
+  # traces/spanmetrics pipeline to reference it without relying on implicit
+  # merge ordering from the built-in config.
+  # otelcol merges map keys: same endpoints win, one receiver instance is created.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Tails all log files written by make recipes (and otelcol itself — see
+  # service.telemetry.logs below which writes to /dev/logs/otelcol.log).
+  filelog/logfiles:
     include:
       - /dev/logs/*.log
-    # Read from beginning so logs written before the container starts are ingested.
-    start_at: beginning
+    start_at: end
     poll_interval: 2s
-    # log.file.name attribute carries the recipe name (e.g. "ansible-lint.log").
     include_file_name: true
     include_file_path: false
-    operators:
-      # Try to parse each line as JSON (ansible-lint, packer, etc. emit JSON).
-      # on_error: send passes non-JSON lines through as plain-text body records.
-      - type: json_parser
-        on_error: send
+    fingerprint_size: 5kb
+# ── Processors ────────────────────────────────────────────────────────────────
 
 processors:
-  resource/make:
-    attributes:
-      - key: service.name
-        value: make
-        action: insert
-  batch/make:
+  transform:
+    log_statements:
+      - set(resource.attributes["service.name"], log.attributes["log.file.name"]) where resource.attributes["service.name"] == nil
+
+  batch:
     timeout: 5s
+
+# ── Exporters ─────────────────────────────────────────────────────────────────
 
 exporters:
   # Loki runs at localhost inside the grafana/otel-lgtm container.
-  otlphttp/loki_make:
+  otlphttp/loki:
     endpoint: http://localhost:3100/otlp
     tls:
       insecure: true
 
+  # Prometheus OTLP ingestion endpoint — receives spanmetrics output.
+  otlphttp/prometheus_span:
+    endpoint: http://localhost:9090/api/v1/otlp
+    tls:
+      insecure: true
+
+  otlphttp/tempo:
+    endpoint: http://localhost:3200/api/v1/otlp
+    tls:
+      insecure: true
+
+# ── Connectors ────────────────────────────────────────────────────────────────
+
+connectors:
+  # Generates RED (rate / error / duration) metrics from incoming trace spans.
+  # Acts as an exporter in traces/spanmetrics and a receiver in metrics/spanmetrics.
+  spanmetrics:
+    namespace: traces.span
+    # Default dimensions (always included, cannot be re-declared):
+    #   service.name, span.kind, status.code
+    # Additional span attributes to break down RED metrics by:
+    dimensions:
+      - name: http.request.method
+      - name: http.response.status_code
+      - name: db.system
+      - name: rpc.system
+    histogram:
+      explicit:
+        buckets:
+          [
+            2ms,
+            4ms,
+            6ms,
+            8ms,
+            10ms,
+            50ms,
+            100ms,
+            200ms,
+            400ms,
+            800ms,
+            1s,
+            2s,
+            5s,
+            10s,
+          ]
+    metrics_flush_interval: 15s
+
+# ── Extensions ────────────────────────────────────────────────────────────────
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+    path: /health/status
+    check_collector_pipeline:
+      enabled: true
+      interval: 5m
+      exporter_failure_threshold: 5
+
+# ── Service ───────────────────────────────────────────────────────────────────
+
 service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+      # Write structured logs to /dev/logs/otelcol.log so filelog/make picks
+      # them up (the *.log glob covers this file automatically).
+      output_paths:
+        - /dev/logs/otelcol.log
+        - stdout
+    metrics:
+      # detailed exposes all available self-metrics at :8888/metrics,
+      # which Prometheus scrapes via the scrape_configs in prometheus.yaml.
+      level: detailed
   pipelines:
-    # logs/make is a distinct pipeline; it does not conflict with the built-in
-    # "logs" pipeline that handles OTLP-pushed logs.
+    # ── Logs ──────────────────────────────────────────────────────────────────
     logs/make:
-      receivers: [filelog/make]
-      processors: [resource/make, batch/make]
-      exporters: [otlphttp/loki_make]
+      receivers: [filelog/logfiles, otlp]
+      processors: [transform, batch]
+      exporters: [otlphttp/loki]
+    # ── Traces → span metrics (fan-out from built-in otlp receiver) ───────────
+    # The built-in "traces" pipeline already forwards spans to Tempo.
+    # This second pipeline consumes the same otlp receiver via fan-out and
+    # generates RED metrics via the spanmetrics connector.
+    traces/spanmetrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [spanmetrics, otlphttp/tempo]
+    # ── Metrics from span RED metrics ─────────────────────────────────────────
+    metrics/spanmetrics:
+      receivers: [spanmetrics, otlp]
+      processors: [batch]
+      exporters: [otlphttp/prometheus_span]

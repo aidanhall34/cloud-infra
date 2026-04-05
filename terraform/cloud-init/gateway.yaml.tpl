@@ -1,5 +1,5 @@
 #cloud-config
-# vm-gateway: WireGuard VPN, Blocky DNS, Nginx static site, otelcol-contrib
+# vm-gateway: WireGuard VPN, Blocky DNS, otelcol-contrib
 # OS: Alpine Linux (x86, VM.Standard.E2.1.Micro)
 # Built via Packer + Ansible (base, common, gateway roles).
 # Packages, binaries, and OpenRC services are pre-installed in the image.
@@ -179,30 +179,6 @@ write_files:
 
       echo "blocky-generate-config: wrote $OUTPUT"
 
-  # ── Nginx: public static site ────────────────────────────────────────────
-  # Alpine Nginx uses /etc/nginx/http.d/ — no sites-available/sites-enabled.
-  - path: /etc/nginx/http.d/homelab.conf
-    content: |
-      server {
-          listen 80 default_server;
-          listen [::]:80 default_server;
-          server_name ${static_site_domain != "" ? static_site_domain : "_"};
-          root /var/www/homelab;
-          index index.html;
-
-          location / {
-              try_files $uri $uri/ =404;
-          }
-      }
-
-  - path: /var/www/homelab/index.html
-    content: |
-      <!DOCTYPE html>
-      <html lang="en">
-      <head><meta charset="UTF-8"><title>Home</title></head>
-      <body><p>Hello.</p></body>
-      </html>
-
   # ── otelcol-contrib config ───────────────────────────────────────────────
   # Binary and OpenRC service installed by Packer common role.
   # Only the per-instance config (endpoints) is written here.
@@ -230,8 +206,6 @@ write_files:
           include:
             - /var/log/messages
             - /var/log/blocky.log
-            - /var/log/nginx/access.log
-            - /var/log/nginx/error.log
           start_at: end
           storage: file_storage
 
@@ -297,12 +271,6 @@ runcmd:
   - chown -R blocky:blocky /etc/blocky
   - /usr/local/bin/blocky-generate-config.sh
   - rc-service blocky start
-
-  # ── Nginx ─────────────────────────────────────────────────────────────────
-  - rc-service nginx start
-  %{ if static_site_domain != "" ~}
-  - certbot --nginx -d ${static_site_domain} --non-interactive --agree-tos -m admin@${static_site_domain} --redirect
-  %{ endif ~}
 
   # ── otelcol-contrib ───────────────────────────────────────────────────────
   # Config written above; binary and OpenRC service installed by Packer.

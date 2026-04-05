@@ -50,29 +50,22 @@ resource "oci_core_security_list" "gateway" {
   ingress_security_rules {
     protocol = "6"
     source   = "0.0.0.0/0"
-    tcp_options { min = 22; max = 22 }
+    tcp_options {
+      min = 22
+      max = 22
+    }
   }
 
   # WireGuard
   ingress_security_rules {
     protocol = "17"
     source   = "0.0.0.0/0"
-    udp_options { min = var.wireguard_port; max = var.wireguard_port }
+    udp_options {
+      min = var.wireguard_port
+      max = var.wireguard_port
+    }
   }
 
-  # HTTP (public static site + certbot challenge)
-  ingress_security_rules {
-    protocol = "6"
-    source   = "0.0.0.0/0"
-    tcp_options { min = 80; max = 80 }
-  }
-
-  # HTTPS (public static site)
-  ingress_security_rules {
-    protocol = "6"
-    source   = "0.0.0.0/0"
-    tcp_options { min = 443; max = 443 }
-  }
 }
 
 resource "oci_core_security_list" "telemetry" {
@@ -89,7 +82,10 @@ resource "oci_core_security_list" "telemetry" {
   ingress_security_rules {
     protocol = "6"
     source   = "0.0.0.0/0"
-    tcp_options { min = 22; max = 22 }
+    tcp_options {
+      min = 22
+      max = 22
+    }
   }
 
   # All traffic from within the VCN (otelcol metrics/logs/traces from gateway → telemetry)

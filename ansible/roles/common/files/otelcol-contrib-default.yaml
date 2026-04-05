@@ -1,0 +1,31 @@
+# Minimal default otelcol-contrib config written by the common Ansible role.
+# Cloud-init replaces this with the instance-specific config on first boot.
+# This file exists so the binary can be validated during image build.
+
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol-contrib/filestore
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+processors:
+  batch:
+    timeout: 10s
+
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
