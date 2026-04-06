@@ -60,13 +60,6 @@ services:
       - prometheus_data:/data/prometheus
       - loki_data:/data/loki
       - tempo_data:/data/tempo
-    lifecycle:
-      pre_stop:
-        exec:
-          # Flush the Prometheus WAL to a consistent TSDB block before shutdown.
-          # This ensures the named volume contains a clean snapshot rather than
-          # relying on WAL replay at next startup.
-          command: ["curl", "-sf", "-XPOST", "http://localhost:9090/api/v1/admin/tsdb/snapshot"]
     labels:
       # offen/docker-volume-backup: run this command inside the lgtm container before each backup.
       # Triggers a Prometheus TSDB snapshot so the WAL is flushed to a consistent block.
