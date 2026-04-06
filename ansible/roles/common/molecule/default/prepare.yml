@@ -1,13 +1,9 @@
 ---
+# Bootstrap tasks moved into the common role (tasks/main.yml).
+# The common role installs python3, openrc, and ensures /etc/apk/repositories
+# exists as its first tasks using ansible.builtin.raw, then calls setup to
+# gather facts. converge.yml runs with gather_facts: false for this reason.
 - name: Prepare Alpine container
   hosts: all
   gather_facts: false
-
-  tasks:
-    - name: Install Python 3 and OpenRC
-      ansible.builtin.raw: apk add --no-cache python3 openrc
-      changed_when: true
-
-    - name: Ensure /etc/apk/repositories exists
-      ansible.builtin.raw: test -f /etc/apk/repositories || echo "" > /etc/apk/repositories
-      changed_when: true
+  tasks: []

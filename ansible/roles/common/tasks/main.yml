@@ -1,4 +1,19 @@
 ---
+# ── Bootstrap ────────────────────────────────────────────────────────────────
+# Raw tasks — run without Python on the target. Required on a fresh Alpine image
+# before any module-based task can execute.
+
+- name: Install python3 and openrc
+  ansible.builtin.raw: apk add --no-cache python3 openrc
+  changed_when: false
+
+- name: Ensure /etc/apk/repositories exists
+  ansible.builtin.raw: test -f /etc/apk/repositories || echo "" > /etc/apk/repositories
+  changed_when: false
+
+- name: Gather facts
+  ansible.builtin.setup:
+
 # ── Package repositories ───────────────────────────────────────────────────────
 
 - name: Enable Alpine main repository

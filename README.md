@@ -115,23 +115,23 @@ After installing the tools above, run `make setup` to create the Python virtual 
 
 | Target | Description | Source |
 |---|---|---|
-| `make dev-secrets` | Generate dev Grafana admin credentials (secrets/dev-grafana.env) — skips if already present | [Makefile:276](Makefile#L276) |
-| `make otelcol-validate` | Validate otelcol configs against otelcol-contrib $(OTELCOL_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:289](Makefile#L289) |
-| `make blocky-validate` | Validate blocky config with blocky v$(BLOCKY_VERSION) | [Makefile:301](Makefile#L301) |
-| `make prometheus-validate` | Validate prometheus config with promtool $(PROMETHEUS_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:309](Makefile#L309) |
-| `make dev-up` | Start the local LGTM development stack (Grafana on :3000, anonymous admin) | [Makefile:319](Makefile#L319) |
-| `make dev-down` | Stop and remove the local LGTM development stack | [Makefile:324](Makefile#L324) |
-| `make dev-logs` | Tail logs from all development stack services | [Makefile:329](Makefile#L329) |
+| `make dev-secrets` | Generate dev Grafana admin + renderer credentials (secrets/dev-grafana.env) — skips if already present | [Makefile:276](Makefile#L276) |
+| `make otelcol-validate` | Validate otelcol configs against otelcol-contrib $(OTELCOL_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:290](Makefile#L290) |
+| `make blocky-validate` | Validate blocky config with blocky v$(BLOCKY_VERSION) | [Makefile:302](Makefile#L302) |
+| `make prometheus-validate` | Validate prometheus config with promtool $(PROMETHEUS_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:310](Makefile#L310) |
+| `make dev-up` | Start the local LGTM development stack (Grafana on :3000, anonymous admin) | [Makefile:320](Makefile#L320) |
+| `make dev-down` | Stop and remove the local LGTM development stack | [Makefile:325](Makefile#L325) |
+| `make dev-logs` | Tail logs from all development stack services | [Makefile:330](Makefile#L330) |
 
 ### Scripts container
 
 | Target | Description | Source |
 |---|---|---|
-| `make build` | Build the scripts container image (aidanhall34/homelab:latest) | [Makefile:335](Makefile#L335) |
+| `make build` | Build the scripts container image (aidanhall34/homelab:latest) | [Makefile:336](Makefile#L336) |
 
 ### Documentation
 
 | Target | Description | Source |
 |---|---|---|
-| `make readme` | Regenerate README.md from README.md.tpl and Makefile comments | [Makefile:345](Makefile#L345) |
+| `make readme` | Regenerate README.md from README.md.tpl and Makefile comments | [Makefile:346](Makefile#L346) |
 

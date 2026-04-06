@@ -27,6 +27,12 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
+  # Receives InfluxDB line protocol metrics over HTTP.
+  # Used by offen/docker-volume-backup to report backup job metrics.
+  # Accepts v1 writes at /write and v2 writes at /api/v2/write.
+  influxdb:
+    endpoint: 0.0.0.0:8086
+
   # Tails all log files written by make recipes (and otelcol itself — see
   # service.telemetry.logs below which writes to /dev/logs/otelcol.log).
   filelog/logfiles:
@@ -147,6 +153,6 @@ service:
       exporters: [spanmetrics, otlphttp/tempo]
     # ── Metrics from span RED metrics ─────────────────────────────────────────
     metrics/spanmetrics:
-      receivers: [spanmetrics, otlp]
+      receivers: [spanmetrics, otlp, influxdb]
       processors: [batch]
       exporters: [otlphttp/prometheus_span]

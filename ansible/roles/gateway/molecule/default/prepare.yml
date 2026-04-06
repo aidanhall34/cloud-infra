@@ -1,18 +1,9 @@
 ---
+# python3, openrc, and /etc/apk/repositories bootstrap are handled by the
+# common role (tasks/main.yml) — no longer needed here.
+# The community repo must be pre-seeded so package installs in the test
+# container succeed before the common role's lineinfile tasks run.
 - name: Prepare Alpine container for gateway role
   hosts: all
   gather_facts: false
-
-  tasks:
-    - name: Install Python 3 and OpenRC
-      ansible.builtin.raw: apk add --no-cache python3 openrc
-      changed_when: true
-
-    - name: Ensure /etc/apk/repositories exists
-      ansible.builtin.raw: test -f /etc/apk/repositories || echo "" > /etc/apk/repositories
-      changed_when: true
-
-    - name: Enable community repository
-      ansible.builtin.raw: >
-        echo "https://dl-cdn.alpinelinux.org/alpine/latest-stable/community" >> /etc/apk/repositories
-      changed_when: true
+  tasks: []

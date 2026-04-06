@@ -133,4 +133,3 @@
   ansible.builtin.command:
     cmd: /usr/local/bin/blocky validate -c /etc/blocky/config.yaml
   changed_when: false
-
