@@ -29,10 +29,14 @@ OTELCOL_VERSION    := 0.147.0   # bundled in grafana/otel-lgtm:$(LGTM_VERSION)
 PROMETHEUS_VERSION := 3.10.0    # bundled in grafana/otel-lgtm:$(LGTM_VERSION)
 BLOCKY_VERSION     := 0.29.0
 
-# act: use the medium-sized runner image and pass the GitHub token.
-# Override GITHUB_TOKEN in the environment before running CI targets.
-ACT_FLAGS   := --platform ubuntu-latest=catthehacker/ubuntu:act-latest \
-               --secret GITHUB_TOKEN="$(GITHUB_TOKEN)"
+# act: use the medium-sized runner image and inject the GitHub token via gh CLI.
+# GITHUB_TOKEN defaults to `gh auth token` — override in the environment if needed.
+# DISCORD_WEBHOOK_URL is read from secrets/discord_webhook_url — override in the environment if needed.
+GITHUB_TOKEN         ?= $(shell gh auth token)
+DISCORD_WEBHOOK_URL  ?= $(shell cat $(SECRETS_DIR)/discord_webhook_url 2>/dev/null)
+ACT_FLAGS            := --platform ubuntu-latest=catthehacker/ubuntu:act-latest \
+                        --secret GITHUB_TOKEN="$(GITHUB_TOKEN)" \
+                        --secret DISCORD_WEBHOOK_URL="$(DISCORD_WEBHOOK_URL)"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 # Each recipe tees its combined stdout+stderr to dev/logs/<target>.log (append).
@@ -62,17 +66,17 @@ tf-init: ## Initialise Terraform with the local secrets/backend.hcl
 .PHONY: tf-plan
 tf-plan: ## Run terraform plan (writes plan to /tmp/tfplan.binary)
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && terraform plan -out=/tmp/tfplan.binary; } $(L)
+	{ cd $(TF_DIR) && OTEL_TRACES_EXPORTER=otlp terraform plan -out=/tmp/tfplan.binary; } $(L)
 
 .PHONY: tf-apply
 tf-apply: ## Apply the last plan produced by `make plan`
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && terraform apply /tmp/tfplan.binary; } $(L)
+	{ cd $(TF_DIR) && OTEL_TRACES_EXPORTER=otlp terraform apply /tmp/tfplan.binary; } $(L)
 
 .PHONY: tf-destroy
 tf-destroy: ## Destroy all managed infrastructure (prompts for confirmation)
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && terraform destroy; } $(L)
+	{ cd $(TF_DIR) && OTEL_TRACES_EXPORTER=otlp terraform destroy; } $(L)
 
 .PHONY: tf-fmt
 tf-fmt: ## Run terraform fmt recursively
@@ -89,30 +93,86 @@ tf-validate: ## Run terraform validate (requires terraform init first)
 	@mkdir -p $(LOG_DIR)
 	{ cd $(TF_DIR) && terraform validate; } $(L)
 
-## CI via act (local GitHub Actions runner)
+## CI — local act runs
+# GITHUB_TOKEN is injected automatically via `gh auth token`.
+# Other secret env vars (LINODE_TOKEN etc.) must be set before running these targets.
 
-.PHONY: ci-plan
-ci-plan: ## Run the deploy workflow (plan action) locally via act
+.PHONY: ci-pre-commit
+ci-pre-commit: ## Run the pre-commit workflow locally via act
+	@mkdir -p $(LOG_DIR)
+	{ act push --json $(ACT_FLAGS) \
+	  --workflows .github/workflows/pre-commit.yml; } $(L)
+
+.PHONY: ci-unit-tests
+ci-unit-tests: ## Run the unit-tests workflow locally via act
+	@mkdir -p $(LOG_DIR)
+	{ act push --json $(ACT_FLAGS) \
+	  --workflows .github/workflows/unit-tests.yml; } $(L)
+
+.PHONY: ci-molecule-gateway
+ci-molecule-gateway: ## Run the molecule-gateway workflow locally via act
 	@mkdir -p $(LOG_DIR)
 	{ act workflow_dispatch --json $(ACT_FLAGS) \
-	  --input action=plan \
-	  --workflows .github/workflows/deploy.yml; } $(L)
+	  --workflows .github/workflows/molecule-gateway.yml; } $(L)
 
-.PHONY: ci-apply
-ci-apply: ## Run the deploy workflow (apply action) locally via act
+.PHONY: ci-packer-build
+ci-packer-build: ## Run the packer-build workflow locally via act (requires LINODE_TOKEN)
+	@mkdir -p $(LOG_DIR)
+	{ act push --json $(ACT_FLAGS) \
+	  --secret LINODE_TOKEN="$(LINODE_TOKEN)" \
+	  --workflows .github/workflows/packer-build.yml; } $(L)
+
+.PHONY: ci-mikrotik
+ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MIKROTIK_USERNAME, MIKROTIK_PASSWORD, MIKROTIK_WG_GATEWAY_ENDPOINT)
 	@mkdir -p $(LOG_DIR)
 	{ act workflow_dispatch --json $(ACT_FLAGS) \
-	  --input action=apply \
-	  --workflows .github/workflows/deploy.yml; } $(L)
+	  --secret MIKROTIK_HOST="$(MIKROTIK_HOST)" \
+	  --secret MIKROTIK_USERNAME="$(MIKROTIK_USERNAME)" \
+	  --secret MIKROTIK_PASSWORD="$(MIKROTIK_PASSWORD)" \
+	  --secret MIKROTIK_WG_PRIVATE_KEY="$$(cat $(SECRETS_DIR)/wireguard_mikrotik_private.key)" \
+	  --secret MIKROTIK_WG_GATEWAY_PUBLIC_KEY="$$(cat $(SECRETS_DIR)/wireguard_gateway_public.key)" \
+	  --secret MIKROTIK_WG_GATEWAY_ENDPOINT="$(MIKROTIK_WG_GATEWAY_ENDPOINT)" \
+	  --workflows .github/workflows/mikrotik.yml; } $(L)
 
-.PHONY: ci-destroy
-ci-destroy: ## Run the deploy workflow (destroy action) locally via act
+.PHONY: ci-terraform-apply
+ci-terraform-apply: ## Manually run terraform-apply via act (requires LINODE_TOKEN, TF_STATE_*, TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE, GATEWAY_IMAGE)
 	@mkdir -p $(LOG_DIR)
 	{ act workflow_dispatch --json $(ACT_FLAGS) \
-	  --input action=destroy \
-	  --workflows .github/workflows/deploy.yml; } $(L)
+	  --input gateway_image="$(GATEWAY_IMAGE)" \
+	  --secret LINODE_TOKEN="$(LINODE_TOKEN)" \
+	  --secret TF_STATE_BUCKET="$(TF_STATE_BUCKET)" \
+	  --secret TF_STATE_REGION="$(TF_STATE_REGION)" \
+	  --secret TF_STATE_ENDPOINT="$(TF_STATE_ENDPOINT)" \
+	  --secret TF_STATE_ACCESS_KEY="$(TF_STATE_ACCESS_KEY)" \
+	  --secret TF_STATE_SECRET_KEY="$(TF_STATE_SECRET_KEY)" \
+	  --secret TF_SSH_PUBLIC_KEY="$(TF_SSH_PUBLIC_KEY)" \
+	  --secret TF_ALLOWED_IP_RANGE="$(TF_ALLOWED_IP_RANGE)" \
+	  --workflows .github/workflows/terraform-apply.yml; } $(L)
 
 ## Secrets and credentials
+
+.PHONY: generate-wireguard-keys
+generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg)
+	@mkdir -p $(SECRETS_DIR)
+	{ changed=0; \
+	  if [ ! -f $(SECRETS_DIR)/wireguard_gateway_private.key ]; then \
+	    wg genkey | tee $(SECRETS_DIR)/wireguard_gateway_private.key | wg pubkey > $(SECRETS_DIR)/wireguard_gateway_public.key; \
+	    chmod 600 $(SECRETS_DIR)/wireguard_gateway_private.key; \
+	    echo "Generated: $(SECRETS_DIR)/wireguard_gateway_private.key"; \
+	    echo "Generated: $(SECRETS_DIR)/wireguard_gateway_public.key"; \
+	    changed=1; \
+	  fi; \
+	  if [ ! -f $(SECRETS_DIR)/wireguard_mikrotik_private.key ]; then \
+	    wg genkey | tee $(SECRETS_DIR)/wireguard_mikrotik_private.key | wg pubkey > $(SECRETS_DIR)/wireguard_mikrotik_public.key; \
+	    chmod 600 $(SECRETS_DIR)/wireguard_mikrotik_private.key; \
+	    echo "Generated: $(SECRETS_DIR)/wireguard_mikrotik_private.key"; \
+	    echo "Generated: $(SECRETS_DIR)/wireguard_mikrotik_public.key"; \
+	    changed=1; \
+	  fi; \
+	  [ "$$changed" = "0" ] && echo "All WireGuard keys already exist — delete them first to regenerate."; \
+	  echo ""; \
+	  echo "Gateway public key:  $$(cat $(SECRETS_DIR)/wireguard_gateway_public.key)"; \
+	  echo "MikroTik public key: $$(cat $(SECRETS_DIR)/wireguard_mikrotik_public.key)"; }
 
 .PHONY: upload-secrets
 upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions
@@ -135,49 +195,6 @@ generate-grafana-key: ## Generate a new Grafana session signing key (secrets/gra
 	  chmod 600 $(SECRETS_DIR)/grafana_secret_key; \
 	  echo "Generated: $(SECRETS_DIR)/grafana_secret_key"; \
 	  echo "Run 'make upload-secrets' to push the new key to GitHub."; } $(L)
-
-## MikroTik router automation
-
-.PHONY: mikrotik
-mikrotik: ## Configure MikroTik WireGuard + DNS via act (local only, not real GitHub Actions)
-	@mkdir -p $(LOG_DIR)
-	{ act workflow_dispatch --json $(ACT_FLAGS) \
-	  --workflows .github/workflows/mikrotik-configure.yml; } $(L)
-
-## Cloud-init boot tests
-# Renders each VM's cloud-init template with test values and runs it on a real
-# Ubuntu VM (via GitHub Actions or act) to verify all services actually boot.
-# ubuntu-24.04-arm is used for telemetry (ARM64); ubuntu-latest for gateway (x86_64).
-
-# act ARM64 platform mapping.
-# catthehacker/ubuntu:act-latest is a multi-arch image; Docker pulls the arm64
-# variant automatically. On x86 hosts, install qemu-user-static for emulation:
-#   sudo apt-get install -y qemu-user-static
-ACT_ARM_FLAGS := --platform ubuntu-24.04-arm=catthehacker/ubuntu:act-latest \
-                 --container-architecture linux/arm64 \
-                 --secret GITHUB_TOKEN="$(GITHUB_TOKEN)"
-
-.PHONY: test-telemetry
-test-telemetry: ## Boot-test the telemetry VM cloud-init (Grafana, VictoriaMetrics, Loki, Tempo)
-	@mkdir -p $(LOG_DIR)
-	{ act workflow_dispatch --json $(ACT_ARM_FLAGS) \
-	  --job test-telemetry \
-	  --workflows .github/workflows/test-cloud-init.yml; } $(L)
-
-.PHONY: test-gateway
-test-gateway: ## Boot-test the gateway VM cloud-init (Blocky DNS, Nginx)
-	@mkdir -p $(LOG_DIR)
-	{ act workflow_dispatch --json $(ACT_FLAGS) \
-	  --job test-gateway \
-	  --workflows .github/workflows/test-cloud-init.yml; } $(L)
-
-.PHONY: test
-test: test-gateway test-telemetry ## Run all cloud-init boot tests
-
-.PHONY: test-clean
-test-clean: ## Remove all test containers left over from a local test run
-	@mkdir -p $(LOG_DIR)
-	{ docker rm -f testenv minio 2>/dev/null || true; } $(L)
 
 ## Setup
 
@@ -241,29 +258,50 @@ ansible-doc: ## Generate documentation for all custom Ansible modules into docs/
 		done; \
 	done; } $(L)
 
+## Linode — credentials
+
+.PHONY: linode-login
+linode-login: ## Authenticate the Linode CLI via browser (writes to ~/.config/linode-cli)
+	cd $(SCRIPTS_DIR) && uv run linode-cli configure
+
+.PHONY: linode-packer-token
+linode-packer-token: ## Create a Linode packer API token expiring in 24 hours (linodes + images read/write, event read_only) - DO NOT LOG
+	@mkdir -p $(LOG_DIR)
+	EXPIRY=$$(date -u -d '+1 day' '+%Y-%m-%dT%H:%M:%S'); \
+	cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
+	    --label "packer-$$(date -u '+%Y%m%d')" \
+	    --expiry "$$EXPIRY" \
+	    --scopes "linodes:read_write images:read_write events:read_only" \
+	    --json --pretty;
+
+.PHONY: linode-deploy-token
+linode-deploy-token: ## Create a Linode API token for Terraform deployments (linodes + firewall read/write) - DO NOT LOG
+	@mkdir -p $(LOG_DIR)
+	EXPIRY=$$(date -u -d '+1 day' '+%Y-%m-%dT%H:%M:%S'); \
+	cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
+	    --label "terraform-$$(date -u '+%Y%m%d')" \
+	    --expiry "$$EXPIRY" \
+	    --scopes "linodes:read_write firewall:read_write events:read_only" \
+	    --json --pretty;
+
 ## Packer — image builds
 
 .PHONY: packer-init
 packer-init: ## Initialise Packer plugins for all builds (run once after checkout)
 	@mkdir -p $(LOG_DIR)
-	{ cd packer/alpine && packer init .; } $(L)
 	{ cd packer/gateway && packer init .; } $(L)
 
-.PHONY: packer-build
-packer-build: ## Build the Alpine base image and upload it to OCI
-	@mkdir -p $(LOG_DIR)
-	{ cd packer/alpine && packer build -var-file=vars.pkrvars.hcl .; } $(L)
-
 .PHONY: packer-build-gateway
-packer-build-gateway: ## Build the Alpine gateway image (WireGuard, Blocky, Nginx) and upload it to OCI
+packer-build-gateway: ## Build the Alpine gateway image (WireGuard, Blocky, Nginx) and upload it to Linode
 	@mkdir -p $(LOG_DIR)
-	{ cd packer/gateway && packer build -var-file=vars.pkrvars.hcl .; } $(L)
+	{ flag=$$([ -f packer/gateway/vars.pkrvars.hcl ] && echo "-var-file=vars.pkrvars.hcl"); \
+	  cd packer/gateway && packer build $$flag .; } $(L)
 
 .PHONY: packer-validate
-packer-validate: ## Validate all Packer configurations without building
+packer-validate: packer-init ## Validate all Packer configurations without building
 	@mkdir -p $(LOG_DIR)
-	{ cd packer/alpine && packer validate -var-file=vars.pkrvars.hcl .; } $(L)
-	{ cd packer/gateway && packer validate -var-file=vars.pkrvars.hcl .; } $(L)
+	{ flag=$$([ -f packer/gateway/vars.pkrvars.hcl ] && echo "-var-file=vars.pkrvars.hcl"); \
+	  cd packer/gateway && packer validate $$flag .; } $(L)
 
 .PHONY: packer-fmt
 packer-fmt: ## Format Packer configuration (all builds)
@@ -271,6 +309,12 @@ packer-fmt: ## Format Packer configuration (all builds)
 	{ cd packer && packer fmt -recursive .; } $(L)
 
 ## Development
+
+.PHONY: dev-volumes
+dev-volumes: ## Create persistent telemetry volumes (idempotent — safe to run on an existing setup)
+	docker volume create dev-prometheus-data
+	docker volume create dev-loki-data
+	docker volume create dev-tempo-data
 
 .PHONY: dev-secrets
 dev-secrets: ## Generate dev Grafana admin + renderer credentials (secrets/dev-grafana.env) — skips if already present
@@ -280,8 +324,8 @@ dev-secrets: ## Generate dev Grafana admin + renderer credentials (secrets/dev-g
 	  else \
 	    password=$$(openssl rand -hex 16); \
 	    renderer_token=$$(openssl rand -hex 24); \
-	    printf 'GF_SECURITY_ADMIN_PASSWORD=%s\nGRAFANA_URL=http://admin:%s@lgtm:3000\nAUTH_TOKEN=%s\nGF_RENDERING_RENDERER_TOKEN=%s\n' \
-	        "$$password" "$$password" "$$renderer_token" "$$renderer_token" > $(SECRETS_DIR)/dev-grafana.env; \
+	    printf 'GF_SECURITY_ADMIN_PASSWORD=%s\nGRAFANA_URL=http://lgtm:3000\nAUTH_TOKEN=%s\nGF_RENDERING_RENDERER_TOKEN=%s\n' \
+	        "$$password" "$$renderer_token" "$$renderer_token" > $(SECRETS_DIR)/dev-grafana.env; \
 	    chmod 600 $(SECRETS_DIR)/dev-grafana.env; \
 	    echo "Generated $(SECRETS_DIR)/dev-grafana.env"; \
 	  fi; } $(L)
@@ -329,13 +373,12 @@ dev-restore: ## Restore dev volumes from S3 (latest backup). Pass FILE=<name> to
 otelcol-validate: ## Validate otelcol configs against otelcol-contrib $(OTELCOL_VERSION) (bundled in grafana/otel-lgtm)
 	@mkdir -p $(LOG_DIR)
 	{ docker run --rm \
-		-v "$(CURDIR)/$(DEV_DIR)/otelcol-extra.yaml:/etc/otelcol/extra.yaml:ro" \
+		-v "$(CURDIR)/$(DEV_DIR)/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro" \
 		--entrypoint="" \
 		grafana/otel-lgtm:$(LGTM_VERSION) \
 		/otel-lgtm/otelcol-contrib/otelcol-contrib validate \
 			--feature-gates service.profilesSupport \
-			--config=file:/otel-lgtm/otelcol-config.yaml \
-			--config=file:/etc/otelcol/extra.yaml; } $(L)
+			--config=file:/otel-lgtm/otelcol-config.yaml ; } $(L)
 
 .PHONY: blocky-validate
 blocky-validate: ## Validate blocky config with blocky v$(BLOCKY_VERSION)
@@ -356,7 +399,7 @@ prometheus-validate: ## Validate prometheus config with promtool $(PROMETHEUS_VE
 			/etc/prometheus/prometheus.yaml; } $(L)
 
 .PHONY: dev-up
-dev-up: ## Start the local LGTM development stack (Grafana on :3000, anonymous admin)
+dev-up: dev-volumes ## Start the local LGTM development stack (Grafana on :3000, anonymous admin)
 	@mkdir -p $(LOG_DIR)
 	{ docker compose -f $(DEV_DIR)/docker-compose.yml up -d --wait ; } $(L)
 

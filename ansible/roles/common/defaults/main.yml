@@ -11,9 +11,9 @@ common_packages:
   - chrony
   - openssh
 
-# cloud-init OCI datasource — Oracle is preferred; ConfigDrive and NoCloud as fallback.
+# cloud-init Linode datasource — Linode is preferred; ConfigDrive and NoCloud as fallback.
 common_cloud_init_datasources:
-  - Oracle
+  - Linode
   - ConfigDrive
   - NoCloud
   - None

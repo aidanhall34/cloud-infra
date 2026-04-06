@@ -49,10 +49,9 @@
 
 # ── Blocky DNS ────────────────────────────────────────────────────────────────
 
-- name: Map Alpine arch to Blocky release arch
+- name: Set Blocky release arch
   ansible.builtin.set_fact:
-    gateway_blocky_arch: >-
-      {{ 'arm64' if ansible_architecture == 'aarch64' else 'x86_64' }}
+    gateway_blocky_arch: x86_64
 
 - name: Create blocky group
   ansible.builtin.group:

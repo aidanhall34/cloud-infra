@@ -1,0 +1,78 @@
+name: packer-build
+
+on:
+  push:
+    branches:
+      - main
+
+# Shared concurrency group with terraform-apply — only one deploy operation
+# runs at a time. cancel-in-progress: false queues rather than cancels.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_id: ${{ steps.image.outputs.image_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record start time
+        id: start
+        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python venvs
+        run: make setup
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@v3
+
+      - name: Packer init
+        run: make packer-init
+
+      - name: Build gateway image
+        env:
+          PKR_VAR_linode_token: ${{ secrets.LINODE_TOKEN }}
+        run: make packer-build-gateway
+
+      - name: Get image ID
+        id: image
+        env:
+          LINODE_CLI_TOKEN: ${{ secrets.LINODE_TOKEN }}
+        run: |
+          image_id=$(cd scripts && uv run linode-cli images list --json \
+            | python3 -c "
+import sys, json
+imgs = [i for i in json.load(sys.stdin)
+        if not i.get('is_public', True) and i.get('label', '').startswith('alpine-gateway-')]
+imgs.sort(key=lambda i: i['created'])
+print(imgs[-1]['id'])
+")
+          echo "image_id=${image_id}" >> "$GITHUB_OUTPUT"
+          echo "${image_id}" > image_id.txt
+
+      - name: Upload image ID artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packer-image-id
+          path: image_id.txt
+          retention-days: 1
+
+      - name: Notify Discord
+        if: always()
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "packer-build — gateway"
+          job-start-time: ${{ steps.start.outputs.ts }}
+          run-id: ${{ github.run_id }}
+          run-number: ${{ github.run_number }}
+          repo: ${{ github.repository }}

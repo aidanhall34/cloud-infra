@@ -1,0 +1,71 @@
+---
+# ── Validation ────────────────────────────────────────────────────────────────
+
+- name: Assert all required variables are defined
+  ansible.builtin.assert:
+    that:
+      - mikrotik_host is defined
+      - mikrotik_host | length > 0
+      - mikrotik_password is defined
+      - mikrotik_password | length > 0
+      - mikrotik_wg_private_key is defined
+      - mikrotik_wg_private_key | length > 0
+      - mikrotik_wg_gateway_public_key is defined
+      - mikrotik_wg_gateway_public_key | length > 0
+    fail_msg: >-
+      Missing required variable(s): mikrotik_host, mikrotik_password,
+      mikrotik_wg_private_key, mikrotik_wg_gateway_public_key must all be set.
+
+- name: Assert gateway endpoint is defined
+  ansible.builtin.assert:
+    that:
+      - mikrotik_wg_gateway_endpoint is defined
+      - mikrotik_wg_gateway_endpoint | length > 0
+    fail_msg: >-
+      mikrotik_wg_gateway_endpoint is not defined.
+      Set it to the public IP address of the gateway server.
+
+# ── RouterOS WireGuard configuration ──────────────────────────────────────────
+# no_log suppresses task output to prevent keys and passwords appearing in logs.
+
+- name: Configure WireGuard tunnel to gateway
+  module_defaults:
+    group/community.routeros.api:
+      hostname: "{{ mikrotik_host }}"
+      username: "{{ mikrotik_username }}"
+      password: "{{ mikrotik_password }}"
+      tls: "{{ mikrotik_api_tls }}"
+      validate_certs: "{{ mikrotik_api_validate_certs }}"
+  no_log: true
+  block:
+    - name: Create or update WireGuard interface
+      community.routeros.api_modify:
+        path: interface/wireguard
+        handle_write_only: always_update
+        data:
+          - name: "{{ mikrotik_wg_interface }}"
+            listen-port: "{{ mikrotik_wg_listen_port | int }}"
+            mtu: "{{ mikrotik_wg_mtu | int }}"
+            private-key: "{{ mikrotik_wg_private_key }}"
+
+    - name: Assign IP address to WireGuard interface
+      community.routeros.api_modify:
+        path: ip/address
+        restrict:
+          interface: "{{ mikrotik_wg_interface }}"
+        data:
+          - address: "{{ mikrotik_wg_address }}"
+            interface: "{{ mikrotik_wg_interface }}"
+
+    - name: Configure gateway peer
+      community.routeros.api_modify:
+        path: interface/wireguard/peers
+        restrict:
+          interface: "{{ mikrotik_wg_interface }}"
+        data:
+          - interface: "{{ mikrotik_wg_interface }}"
+            public-key: "{{ mikrotik_wg_gateway_public_key }}"
+            allowed-address: "{{ mikrotik_wg_gateway_allowed_address }}"
+            endpoint-address: "{{ mikrotik_wg_gateway_endpoint }}"
+            endpoint-port: "{{ mikrotik_wg_gateway_port | int }}"
+            persistent-keepalive: "{{ mikrotik_wg_keepalive | int }}"

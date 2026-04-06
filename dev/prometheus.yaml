@@ -59,7 +59,7 @@ scrape_configs:
     static_configs:
       - targets: ["127.0.0.1:9090"]
 
-  # otelcol-contrib self-metrics (detailed level set in otelcol-extra.yaml).
+  # otelcol-contrib self-metrics (detailed level set in otelcol-config.yaml).
   - job_name: otelcol
     static_configs:
       - targets: ["127.0.0.1:8888"]

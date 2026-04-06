@@ -1,0 +1,24 @@
+---
+# MikroTik router configuration playbook.
+# Configures a WireGuard tunnel interface to the gateway server via the RouterOS API.
+#
+# The RouterOS API modules connect directly to the router — no SSH inventory needed.
+# All tasks run on localhost; connection to the router is handled by module parameters.
+#
+# Required variables (pass via -e or environment/secrets):
+#   mikrotik_host                  — router IP address or hostname
+#   mikrotik_password              — RouterOS API password          (secret)
+#   mikrotik_wg_private_key        — MikroTik WireGuard private key (secret)
+#   mikrotik_wg_gateway_public_key — gateway WireGuard public key   (secret)
+#   mikrotik_wg_gateway_endpoint   — gateway public IP address      (required, no default)
+#
+# Run locally via act:
+#   make ci-mikrotik
+
+- name: Configure MikroTik router
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  roles:
+    - mikrotik

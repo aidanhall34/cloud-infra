@@ -1,28 +1,21 @@
-# Copy to secrets/backend.hcl and fill in your values.
-# This file is read by: terraform init -backend-config=../secrets/backend.hcl
-# secrets/backend.hcl is gitignored — never commit it.
+# S3-compatible backend using Linode Object Storage.
+# Copy to secrets/backend.hcl and fill in the values.
+# secrets/backend.hcl is gitignored — never commit credentials.
 #
-# ── OCI Object Storage setup (one-time) ─────────────────────────────────────
+# 1. Create a bucket:     https://cloud.linode.com/object-storage/buckets
+# 2. Generate access keys: https://cloud.linode.com/object-storage/access-keys
 #
-# 1. Create the bucket (free tier, 10 GB included):
-#    OCI Console → Object Storage → Buckets → Create Bucket
-#    Name: terraform-state  |  Region: ap-sydney-1  |  Visibility: Private
-#
-# 2. Find your tenancy namespace:
-#    OCI Console → Object Storage → Buckets  (namespace shown in page header)
-#    Or via CLI: oci os ns get
-#
-# 3. Create Customer Secret Keys (S3 HMAC credentials — different from API keys):
-#    OCI Console → Profile → User Settings → Customer Secret Keys → Generate Secret Key
-#    Copy the secret immediately — it won't be shown again.
-#    The "Access Key" shown afterwards is the access_key below.
+# Cluster IDs by region:
+#   ap-southeast  → ap-southeast-1
+#   us-east       → us-east-1
+#   eu-central    → eu-central-1
 
-bucket                      = "terraform-state"
-key                         = "homelab/terraform.tfstate"
-region                      = "ap-sydney-1"
-endpoint                    = "https://<namespace>.compat.objectstorage.ap-sydney-1.oraclecloud.com"
-access_key                  = "<customer-secret-key-access-id>"
-secret_key                  = "<customer-secret-key-secret-value>"
+bucket                      = "your-bucket-name"
+key                         = "terraform/gateway.tfstate"
+region                      = "ap-southeast-1"
+endpoint                    = "ap-southeast-1.linodeobjects.com"
+access_key                  = "your-access-key"
+secret_key                  = "your-secret-key"
 skip_credentials_validation = true
 skip_metadata_api_check     = true
 skip_region_validation      = true

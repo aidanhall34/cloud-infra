@@ -1,0 +1,102 @@
+name: terraform-apply
+
+on:
+  # Automatically triggered after a successful packer-build run on main.
+  workflow_run:
+    workflows:
+      - packer-build
+    types:
+      - completed
+  # Manual trigger — useful for re-deploying an existing image or local act runs.
+  workflow_dispatch:
+    inputs:
+      gateway_image:
+        description: "Linode image ID to deploy (e.g. private/12345678)"
+        required: true
+
+# Shared concurrency group with packer-build.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record start time
+        id: start
+        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Download image ID artifact (workflow_run)
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: packer-image-id
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image ID from workflow_dispatch input
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "${{ github.event.inputs.gateway_image }}" > image_id.txt
+
+      - name: Export TF_VAR_gateway_image
+        run: echo "TF_VAR_gateway_image=$(cat image_id.txt)" >> "$GITHUB_ENV"
+
+      - name: Create backend config
+        env:
+          TF_STATE_BUCKET:     ${{ secrets.TF_STATE_BUCKET }}
+          TF_STATE_REGION:     ${{ secrets.TF_STATE_REGION }}
+          TF_STATE_ENDPOINT:   ${{ secrets.TF_STATE_ENDPOINT }}
+          TF_STATE_ACCESS_KEY: ${{ secrets.TF_STATE_ACCESS_KEY }}
+          TF_STATE_SECRET_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+        run: |
+          mkdir -p secrets
+          {
+            echo "bucket                      = \"$TF_STATE_BUCKET\""
+            echo "key                         = \"terraform/gateway.tfstate\""
+            echo "region                      = \"$TF_STATE_REGION\""
+            echo "endpoint                    = \"$TF_STATE_ENDPOINT\""
+            echo "access_key                  = \"$TF_STATE_ACCESS_KEY\""
+            echo "secret_key                  = \"$TF_STATE_SECRET_KEY\""
+            echo "skip_credentials_validation = true"
+            echo "skip_metadata_api_check     = true"
+            echo "skip_region_validation      = true"
+            echo "force_path_style            = true"
+          } > secrets/backend.hcl
+
+      - name: Terraform init
+        run: make tf-init
+
+      - name: Terraform plan
+        env:
+          TF_VAR_linode_token:     ${{ secrets.LINODE_TOKEN }}
+          TF_VAR_ssh_public_key:   ${{ secrets.TF_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ip_range: ${{ secrets.TF_ALLOWED_IP_RANGE }}
+        run: make tf-plan
+
+      - name: Terraform apply
+        env:
+          TF_VAR_linode_token:     ${{ secrets.LINODE_TOKEN }}
+          TF_VAR_ssh_public_key:   ${{ secrets.TF_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ip_range: ${{ secrets.TF_ALLOWED_IP_RANGE }}
+        run: make tf-apply
+
+      - name: Notify Discord
+        if: always()
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "terraform-apply — gateway"
+          job-start-time: ${{ steps.start.outputs.ts }}
+          run-id: ${{ github.run_id }}
+          run-number: ${{ github.run_number }}
+          repo: ${{ github.repository }}

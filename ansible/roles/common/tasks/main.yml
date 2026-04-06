@@ -63,19 +63,14 @@
 
 - name: Configure cloud-init datasource and logging
   ansible.builtin.copy:
-    dest: /etc/cloud/cloud.cfg.d/90_oracle.cfg
+    dest: /etc/cloud/cloud.cfg.d/90_linode.cfg
     owner: root
     group: root
     mode: "0644"
     content: |
-      # OCI datasource configuration — applied during Packer base image build.
-      # Oracle datasource reads instance metadata from the OCI IMDS endpoint.
+      # Linode datasource configuration — applied during Packer base image build.
+      # Linode datasource reads instance metadata from the Linode Metadata API.
       datasource_list: {{ common_cloud_init_datasources | to_json }}
-
-      datasource:
-        Oracle:
-          max_wait: 120
-          timeout: 30
 
       output:
         all: "| tee -a /var/log/cloud-init-output.log"
@@ -95,7 +90,7 @@
           level: DEBUG
           handlers: [console]
 
-- name: Configure cloud-init to use Oracle datasource in cloud.cfg
+- name: Configure cloud-init to use Linode datasource in cloud.cfg
   ansible.builtin.lineinfile:
     path: /etc/cloud/cloud.cfg
     regexp: "^datasource_list:"
@@ -120,12 +115,10 @@
 
 # ── otelcol-contrib ────────────────────────────────────────────────────────────
 # Downloads the pre-built binary tarball (no .deb on Alpine).
-# Alpine reports arch as x86_64 / aarch64; release assets use amd64 / arm64.
 
-- name: Map Alpine arch to otelcol release arch
+- name: Set otelcol release arch
   ansible.builtin.set_fact:
-    common_otelcol_arch: >-
-      {{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+    common_otelcol_arch: amd64
 
 - name: Create otelcol-contrib group
   ansible.builtin.group:

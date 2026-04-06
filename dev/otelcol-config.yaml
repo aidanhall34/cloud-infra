@@ -27,12 +27,6 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  # Receives InfluxDB line protocol metrics over HTTP.
-  # Used by offen/docker-volume-backup to report backup job metrics.
-  # Accepts v1 writes at /write and v2 writes at /api/v2/write.
-  influxdb:
-    endpoint: 0.0.0.0:8086
-
   # Tails all log files written by make recipes (and otelcol itself — see
   # service.telemetry.logs below which writes to /dev/logs/otelcol.log).
   filelog/logfiles:
@@ -49,7 +43,6 @@ processors:
   transform:
     log_statements:
       - set(resource.attributes["service.name"], log.attributes["log.file.name"]) where resource.attributes["service.name"] == nil
-
   batch:
     timeout: 5s
 
@@ -61,17 +54,20 @@ exporters:
     endpoint: http://localhost:3100/otlp
     tls:
       insecure: true
+    compression: gzip
 
-  # Prometheus OTLP ingestion endpoint — receives spanmetrics output.
-  otlphttp/prometheus_span:
+  # Prometheus OTLP ingestion endpoint
+  otlphttp/prometheus:
     endpoint: http://localhost:9090/api/v1/otlp
     tls:
       insecure: true
+    compression: gzip
 
   otlphttp/tempo:
-    endpoint: http://localhost:3200/api/v1/otlp
+    endpoint: http://localhost:4418
     tls:
       insecure: true
+    compression: gzip
 
 # ── Connectors ────────────────────────────────────────────────────────────────
 
@@ -137,6 +133,12 @@ service:
       # detailed exposes all available self-metrics at :8888/metrics,
       # which Prometheus scrapes via the scrape_configs in prometheus.yaml.
       level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: "0.0.0.0"
+                port: 8888
   pipelines:
     # ── Logs ──────────────────────────────────────────────────────────────────
     logs/make:
@@ -153,6 +155,6 @@ service:
       exporters: [spanmetrics, otlphttp/tempo]
     # ── Metrics from span RED metrics ─────────────────────────────────────────
     metrics/spanmetrics:
-      receivers: [spanmetrics, otlp, influxdb]
+      receivers: [spanmetrics, otlp]
       processors: [batch]
-      exporters: [otlphttp/prometheus_span]
+      exporters: [otlphttp/prometheus]
