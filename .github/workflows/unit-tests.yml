@@ -11,6 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup GitHub CLI
+        uses: ./.github/actions/setup-gh
+
       - name: Record start time
         id: start
         run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
@@ -24,6 +27,8 @@ jobs:
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
       - name: Run unit tests
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} ansible-pytest
 
       - name: Notify Discord

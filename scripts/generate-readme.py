@@ -11,6 +11,8 @@ Options:
 import re
 import sys
 from pathlib import Path
+from typing import TypedDict
+
 
 ROOT = Path(__file__).parent.parent
 MAKEFILE = ROOT / "Makefile"
@@ -19,7 +21,18 @@ OUTPUT = ROOT / "README.md"
 PLACEHOLDER = "<!-- MAKE_TARGETS -->"
 
 
-def parse_makefile(path: Path) -> list[dict]:
+class Target(TypedDict):
+    name: str
+    desc: str
+    line: int
+
+
+class Section(TypedDict):
+    name: str
+    targets: list[Target]
+
+
+def parse_makefile(path: Path) -> list[Section]:
     """Return a list of sections parsed from the Makefile.
 
     Each section is:
@@ -29,8 +42,8 @@ def parse_makefile(path: Path) -> list[dict]:
     Targets are lines matching 'target: ... ## description'.
     Targets with no preceding section header are skipped.
     """
-    sections: list[dict] = []
-    current_section: dict | None = None
+    sections: list[Section] = []
+    current_section: Section | None = None
     in_header = True
 
     for lineno, line in enumerate(path.read_text().splitlines(), start=1):
@@ -56,7 +69,7 @@ def parse_makefile(path: Path) -> list[dict]:
     return sections
 
 
-def generate_targets_section(sections: list[dict]) -> str:
+def generate_targets_section(sections: list[Section]) -> str:
     lines = ["## Available Make Targets", ""]
     for section in sections:
         targets = section["targets"]

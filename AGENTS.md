@@ -4,10 +4,6 @@
 - After a change to the makefile, the README.md file should be updated by running `make readme`.
 - Do not log recipes that generate secrets
 
-# Scripts conventions
-
-- Scripts should be built into a container with the tag -t "aidanhall34/homelab:latest".
-
 # Docs conventions
 
 - All references to module or function names in documentation should contain a link to starting line in the file of the codes declaration.
@@ -27,11 +23,12 @@
 
 # Python conventions
 
-- Python dependencies should managed in venvs, and installed with the UV package manager.
-- Python3.13 is the default version of python to use for applications.
-- Python should be typed, and checked with mypy on every change.
-- Python tests and type checking can be run by running `make build`
+- Python dependencies should managed in venvs, and installed with the `uv` package manager.
+- `Python3.13` is the default version of python to use for applications.
+- Python should be typed, and checked with `mypy` on every change.
+- Python tests and type checking can be run by running `make pre-commit`
 - Python code is linted with `ruff`, and it must be installed in every env as a dependency
+- `pytest` is instrumented with `pytest-opentelemetry`
 
 # Ansible conventions
 

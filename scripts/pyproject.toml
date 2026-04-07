@@ -1,14 +1,11 @@
 [project]
 name = "scripts"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "Python scripts and utilities for managing the repo"
 requires-python = ">=3.13"
 dependencies = [
-    "boto3>=1.42.83",
+    "boto3>=1.42.83",       # required by linode-cli for object storage bucket operations
     "linode-cli>=5.66.0",
-    "pyyaml>=6.0.3",
-    "requests>=2.33.1",
 ]
 
 [dependency-groups]
@@ -16,3 +13,9 @@ dev = [
     "mypy>=1.20.0",
     "ruff>=0.9.0",
 ]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["*.py"]
+exclude = ["^\\.venv/"]

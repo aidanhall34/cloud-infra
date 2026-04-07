@@ -1,0 +1,33 @@
+name: Post Commit Status
+description: >
+  Posts a commit status to the GitHub Statuses API for the current SHA.
+  Requires the workflow to have `statuses: write` permission.
+
+inputs:
+  state:
+    description: "Status state: success, failure, error, or pending"
+    required: true
+  context:
+    description: "Status context label (e.g. molecule/gate)"
+    required: true
+  description:
+    description: "Short human-readable description of the status"
+    required: true
+  target-url:
+    description: "URL to link from the status check"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Post commit status
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+          --method POST \
+          -f state="${{ inputs.state }}" \
+          -f context="${{ inputs.context }}" \
+          -f description="${{ inputs.description }}" \
+          -f target_url="${{ inputs.target-url }}"

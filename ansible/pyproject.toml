@@ -17,13 +17,21 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-mock>=3.14.0",
+    "pytest-opentelemetry>=0.7.0",
     "mypy>=1.15.0",
     "ruff>=0.9.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--export-traces"
 
 [tool.mypy]
 python_version = "3.13"
 strict = true
+files = ["library", "tests"]
+
+[[tool.mypy.overrides]]
+# ansible does not ship type stubs or a py.typed marker.
+module = ["ansible.*"]
+ignore_missing_imports = true
