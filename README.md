@@ -44,7 +44,7 @@ After installing the tools above, run `make setup` to create the Python virtual 
 | `make tf-init-bucket` | Create the Linode Object Storage bucket for Terraform state (idempotent — skips if bucket already exists) | [Makefile:135](Makefile#L135) |
 | `make tf-plan` | Run terraform plan — generates a temporary Linode token and OBJ key automatically | [Makefile:145](Makefile#L145) |
 | `make tf-deploy` | Deploy gateway — generates a temporary Linode token and OBJ key automatically | [Makefile:153](Makefile#L153) |
-| `make tf-debug-bucket` | Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls | [Makefile:162](Makefile#L162) |
+| `make tf-debug-bucket` | Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls - DO NOT LOG | [Makefile:162](Makefile#L162) |
 | `make tf-destroy` | Destroy all managed infrastructure (prompts for confirmation) | [Makefile:187](Makefile#L187) |
 | `make tf-fmt` | Run terraform fmt recursively | [Makefile:192](Makefile#L192) |
 | `make tf-lint` | Check Terraform formatting without modifying files (no provider init required) | [Makefile:197](Makefile#L197) |

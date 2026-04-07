@@ -300,7 +300,7 @@ upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions
 configure-branch-protection: ## Configure main branch protection rules via GitHub CLI (idempotent)
 	@repo=$$(gh repo view --json nameWithOwner -q .nameWithOwner); \
 	echo "Configuring branch protection for $$repo/main..."; \
-	echo '{"required_status_checks":{"strict":false,"checks":[{"context":"molecule-gateway / molecule"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
+	echo '{"required_status_checks":{"strict":false,"checks":[{"context":"molecule-gateway / gate"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
 	  | gh api --method PUT "/repos/$$repo/branches/main/protection" --input -; \
 	echo "Branch protection configured."
 
