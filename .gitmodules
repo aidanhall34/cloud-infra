@@ -1,0 +1,3 @@
+[submodule "homelab-deploy"]
+	path = homelab-deploy
+	url = git@github.com:aidanhall34/homelab-deploy.git
