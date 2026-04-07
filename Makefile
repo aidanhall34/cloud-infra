@@ -63,14 +63,14 @@ ACT_FLAGS            := --platform ubuntu-latest=catthehacker/ubuntu:act-latest 
 # LINODE_TOKEN (picked up by $$LINODE_TOKEN in ACT_FLAGS). Traps revocation on exit.
 # Usage: $(call linode-act-token)
 define linode-act-token
-_act_token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
+_act_token_json=$$(cd $(SCRIPTS_DIR) && uv run --active linode-cli profile token-create \
     --label "act-$$(date +%s)" \
     --expiry "$$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%S')" \
     --scopes "*" \
     --json); \
 _act_token_id=$$(echo "$$_act_token_json" | jq -r '.[0].id'); \
 export LINODE_TOKEN=$$(echo "$$_act_token_json" | jq -r '.[0].token'); \
-trap "echo 'Revoking act Linode token $$_act_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$LINODE_TOKEN\" uv run linode-cli profile token-delete $$_act_token_id" EXIT;
+trap "echo 'Revoking act Linode token $$_act_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$LINODE_TOKEN\" uv run --active linode-cli profile token-delete $$_act_token_id" EXIT;
 endef
 
 # Creates a temporary scoped Linode API token, exports it as LINODE_CLI_TOKEN and
@@ -78,7 +78,7 @@ endef
 # Usage: $(call linode-api-token,<label-prefix>,<scopes>,<export-var>)
 define linode-api-token
 _parent_token="$$LINODE_CLI_TOKEN"; \
-_token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
+_token_json=$$(cd $(SCRIPTS_DIR) && uv run --active linode-cli profile token-create \
     --label "$(1)-$$(date +%s)" \
     --expiry "$$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%S')" \
     --scopes "$(2)" \
@@ -86,21 +86,21 @@ _token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
 _token_id=$$(echo "$$_token_json" | jq -r '.[0].id'); \
 export LINODE_CLI_TOKEN=$$(echo "$$_token_json" | jq -r '.[0].token'); \
 export $(3)="$$LINODE_CLI_TOKEN"; \
-trap "echo 'Revoking Linode token $$_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$_parent_token\" uv run linode-cli profile token-delete $$_token_id" EXIT;
+trap "echo 'Revoking Linode token $$_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$_parent_token\" uv run --active linode-cli profile token-delete $$_token_id" EXIT;
 endef
 
 # Creates a temporary scoped Linode OBJ key and registers a trap to delete it on
 # shell exit. Expands into a recipe as: $(call tf-obj-key,<label-prefix>)
 # Sets shell vars: key_id, access_key, secret_key.
 define tf-obj-key
-export key_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli object-storage keys-create \
+export key_json=$$(cd $(SCRIPTS_DIR) && uv run --active linode-cli object-storage keys-create \
     --label "$(1)-$$(date +%s)" \
     --json); \
 export key_id="$$(echo "$$key_json" | jq -r '.[0].id' )"; \
 export AWS_ACCESS_KEY_ID="$$(echo "$$key_json" | jq -r '.[0].access_key' )"; \
 export AWS_SECRET_ACCESS_KEY="$$(echo "$$key_json" | jq -r '.[0].secret_key' )"; \
 export AWS_REGION="$(TF_STATE_CLUSTER)"; \
-trap "[ -n \"$$key_id\" ] && { echo 'Deleting OBJ key $$key_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run linode-cli object-storage keys-delete $$key_id; }" EXIT; \
+trap "[ -n \"$$key_id\" ] && { echo 'Deleting OBJ key $$key_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run --active linode-cli object-storage keys-delete $$key_id; }" EXIT; \
 echo "Waiting for OBJ key to propagate..."; sleep 10;
 endef
 
@@ -133,12 +133,12 @@ tf-init: ## Initialise Terraform — generates a temporary Linode token and OBJ 
 
 .PHONY: tf-init-bucket
 tf-init-bucket: ## Create the Linode Object Storage bucket for Terraform state (idempotent — skips if bucket already exists)
-	@if cd $(SCRIPTS_DIR) && uv run linode-cli object-storage buckets-list --json 2>/dev/null \
+	@if cd $(SCRIPTS_DIR) && uv run --active linode-cli object-storage buckets-list --json 2>/dev/null \
 	      | python3 -c "import sys,json; data=sys.stdin.read(); exit(0 if data.strip() and any(b['label']=='$(TF_STATE_BUCKET)' for b in json.loads(data)) else 1)"; then \
 	    echo "Bucket $(TF_STATE_BUCKET) already exists — skipping"; \
 	  else \
 	    echo "Creating bucket $(TF_STATE_BUCKET)..."; \
-	    uv run linode-cli obj mb $(TF_STATE_BUCKET) --cluster $(TF_STATE_CLUSTER); \
+	    uv run --active linode-cli obj mb $(TF_STATE_BUCKET) --cluster $(TF_STATE_CLUSTER); \
 	  fi
 
 .PHONY: tf-plan
@@ -159,7 +159,7 @@ tf-deploy: ## Deploy gateway — generates a temporary Linode token and OBJ key 
 	    $(OTEL_ENV) terraform apply -json /tmp/tfplan.binary; } $(L)
 
 .PHONY: tf-debug-bucket
-tf-debug-bucket: ## Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls
+tf-debug-bucket: ## Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls - DO NOT LOG
 	@mkdir -p $(LOG_DIR)
 	@{ $(call tf-obj-key,tf-debug) \
 	  echo "--- Credentials ---"; \
@@ -181,7 +181,7 @@ tf-debug-bucket: ## Debug: create a temp OBJ key and list the Terraform state bu
 	  echo "--- Cleanup ---"; \
 	  aws s3 rm s3://$(TF_STATE_BUCKET)/.debug-write-test \
 	    --endpoint-url https://$(TF_STATE_ENDPOINT) \
-	    --region $(TF_STATE_CLUSTER) || true; } $(L)
+	    --region $(TF_STATE_CLUSTER) || true; }
 
 .PHONY: tf-destroy
 tf-destroy: ## Destroy all managed infrastructure (prompts for confirmation)
@@ -296,6 +296,14 @@ upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions
 	@mkdir -p $(LOG_DIR)
 	@{ $(SCRIPTS_DIR)/upload-secrets.sh; } $(L)
 
+.PHONY: configure-branch-protection
+configure-branch-protection: ## Configure main branch protection rules via GitHub CLI (idempotent)
+	@repo=$$(gh repo view --json nameWithOwner -q .nameWithOwner); \
+	echo "Configuring branch protection for $$repo/main..."; \
+	echo '{"required_status_checks":{"strict":false,"checks":[{"context":"molecule-gateway / gate"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
+	  | gh api --method PUT "/repos/$$repo/branches/main/protection" --input -; \
+	echo "Branch protection configured."
+
 .PHONY: setup-oauth
 setup-oauth: ## Create the GitHub OAuth App for Grafana SSO (writes to secrets/)
 	@mkdir -p $(LOG_DIR)
@@ -338,37 +346,37 @@ lint: lint-python ansible-lint tf-lint packer-validate otelcol-validate promethe
 .PHONY: lint-python
 lint-python: ## Lint all Python code with ruff (scripts/ and ansible/)
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(SCRIPTS_DIR) && uv run ruff check .; } $(L)
-	@{ cd $(ANSIBLE_DIR) && uv run ruff check .; } $(L)
+	@{ cd $(SCRIPTS_DIR) && uv run --active ruff check .; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run --active ruff check .; } $(L)
 
 ## Ansible
 
 .PHONY: ansible-lint
 ansible-lint: ## Lint Ansible roles and modules with ansible-lint
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(ANSIBLE_DIR) && uv run ansible-lint -f json; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run --active ansible-lint -f json; } $(L)
 
 .PHONY: ansible-molecule
 ansible-molecule: ## Run molecule integration tests for all roles (Docker, systemd-compatible containers)
 	@mkdir -p $(LOG_DIR)
 	@{ for role in $(ANSIBLE_DIR)/roles/*/; do \
-		(cd "$$role" && uv run molecule test); \
+		(cd "$$role" && uv run --active molecule test); \
 	done; } $(L)
 
 .PHONY: ansible-molecule-gateway
 ansible-molecule-gateway: ## Run molecule integration tests for the gateway role
 	@mkdir -p $(LOG_DIR)
-	@{ cd "$(ANSIBLE_DIR)/roles/gateway" && uv run molecule test; } $(L)
+	@{ cd "$(ANSIBLE_DIR)/roles/gateway" && uv run --active molecule test; } $(L)
 
 .PHONY: ansible-molecule-common
 ansible-molecule-common: ## Run molecule integration tests for the common role
 	@mkdir -p $(LOG_DIR)
-	@{ cd "$(ANSIBLE_DIR)/roles/common" && uv run molecule test; } $(L)
+	@{ cd "$(ANSIBLE_DIR)/roles/common" && uv run --active molecule test; } $(L)
 
 .PHONY: ansible-pytest
 ansible-pytest: ## Run pytest unit tests for custom Ansible modules
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(ANSIBLE_DIR) && uv run pytest tests/unit/ -v; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run --active pytest tests/unit/ -v; } $(L)
 
 .PHONY: ansible-doc
 ansible-doc: ## Generate documentation for all custom Ansible modules into docs/ansible-modules/
@@ -379,7 +387,7 @@ ansible-doc: ## Generate documentation for all custom Ansible modules into docs/
 			[ -f "$$module" ] || continue; \
 			name=$$(basename "$$module" .py); \
 			rel=$$(realpath --relative-to=$(ANSIBLE_DIR) "$$role_lib"); \
-			cd $(ANSIBLE_DIR) && uv run ansible-doc -M "$$rel" "$$name" > "../docs/ansible-modules/$$name.txt"; \
+			cd $(ANSIBLE_DIR) && uv run --active ansible-doc -M "$$rel" "$$name" > "../docs/ansible-modules/$$name.txt"; \
 			cd ..; \
 		done; \
 	done; } $(L)
@@ -388,7 +396,7 @@ ansible-doc: ## Generate documentation for all custom Ansible modules into docs/
 
 .PHONY: linode-login
 linode-login: ## Authenticate the Linode CLI via browser (writes to ~/.config/linode-cli)
-	cd $(SCRIPTS_DIR) && uv run linode-cli configure
+	cd $(SCRIPTS_DIR) && uv run --active linode-cli configure
 
 ## Packer — image builds
 
@@ -537,4 +545,4 @@ build: ## Build the scripts container image (aidanhall34/homelab:latest)
 .PHONY: readme
 readme: ## Regenerate README.md from README.md.tpl and Makefile comments
 	@mkdir -p $(LOG_DIR)
-	@{ uv run --python 3.13 $(SCRIPTS_DIR)/generate-readme.py; } $(L)
+	@{ uv run --active --python 3.13 $(SCRIPTS_DIR)/generate-readme.py; } $(L)

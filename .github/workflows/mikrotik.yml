@@ -25,7 +25,7 @@ jobs:
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
       - name: Install Ansible collections
-        run: cd ansible && uv run ansible-galaxy collection install -r requirements.yml -p .collections
+        run: cd ansible && uv run --active ansible-galaxy collection install -r requirements.yml -p .collections
 
       - name: Configure MikroTik WireGuard
         env:
@@ -36,7 +36,7 @@ jobs:
           MIKROTIK_WG_GATEWAY_PUBLIC_KEY: ${{ secrets.MIKROTIK_WG_GATEWAY_PUBLIC_KEY }}
           MIKROTIK_WG_GATEWAY_ENDPOINT: ${{ secrets.MIKROTIK_WG_GATEWAY_ENDPOINT }}
         run: |
-          cd ansible && uv run ansible-playbook mikrotik.yml \
+          cd ansible && uv run --active ansible-playbook mikrotik.yml \
             -e mikrotik_host="$MIKROTIK_HOST" \
             -e mikrotik_username="$MIKROTIK_USERNAME" \
             -e mikrotik_password="$MIKROTIK_PASSWORD" \

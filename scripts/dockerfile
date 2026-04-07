@@ -4,11 +4,11 @@ WORKDIR /scripts
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY * .
 RUN uv sync --dev
-RUN uv run mypy *.py
+RUN uv run --active mypy *.py
 
 # Run unit tests
 FROM type-check AS test
-RUN uv run pytest .
+RUN uv run --active pytest .
 
 # Manage entrypoint
 FROM python:3.13-slim AS run

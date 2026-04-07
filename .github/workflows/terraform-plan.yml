@@ -1,19 +1,15 @@
 name: terraform-plan
 
 on:
-  # Automatically triggered after a successful packer-build run on any branch.
+  # Only triggered after a successful packer-build run — ensures the latest image
+  # is available before planning, and prevents concurrent plan + apply runs.
   workflow_run:
     workflows:
       - packer-build
     types:
       - completed
-  # Also triggered directly on pushes to main that touch only terraform (no packer/ansible changes).
-  push:
-    branches:
-      - main
-    paths:
-      - "terraform/**"
-      - ".github/workflows/terraform-plan.yml"
+  # Manual trigger for terraform-only changes (no ansible/packer changes to drive packer-build).
+  workflow_dispatch:
 
 # Cancel in-progress plans for the same commit when a newer event arrives.
 concurrency:
@@ -24,13 +20,10 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     environment: build
-    # For workflow_run: only proceed if the triggering build succeeded.
-    # For push: always proceed.
     if: |
-      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     steps:
-      # Check out the exact commit that triggered this run (or HEAD for direct pushes).
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
