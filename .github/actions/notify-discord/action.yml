@@ -36,12 +36,12 @@ runs:
       shell: bash
       env:
         DISCORD_WEBHOOK_URL: ${{ inputs.webhook-url }}
-        JOB_STATUS:          ${{ inputs.status }}
-        TITLE:               ${{ inputs.title }}
-        JOB_START_TIME:      ${{ inputs.job-start-time }}
-        RUN_ID:              ${{ inputs.run-id }}
-        RUN_NUMBER:          ${{ inputs.run-number }}
-        REPO:                ${{ inputs.repo }}
+        JOB_STATUS: ${{ inputs.status }}
+        TITLE: ${{ inputs.title }}
+        JOB_START_TIME: ${{ inputs.job-start-time }}
+        RUN_ID: ${{ inputs.run-id }}
+        RUN_NUMBER: ${{ inputs.run-number }}
+        REPO: ${{ inputs.repo }}
       run: |
         end_time=$(date -u +%s)
         start_time="$JOB_START_TIME"

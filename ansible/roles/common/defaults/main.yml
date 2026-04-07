@@ -1,0 +1,25 @@
+---
+# Alpine repository mirror — "latest-stable" always resolves to the current release.
+common_alpine_repo_base: "https://dl-cdn.alpinelinux.org/alpine/latest-stable"
+
+# Packages installed on every VM.
+common_packages:
+  - curl
+  - wget
+  - unzip
+  - tar       # GNU tar — required by ansible.builtin.unarchive (BusyBox tar is not supported)
+  - chrony
+  - openssh
+
+# cloud-init Linode datasource — Linode is preferred; ConfigDrive and NoCloud as fallback.
+common_cloud_init_datasources:
+  - Linode
+  - ConfigDrive
+  - NoCloud
+  - None
+
+# cloud-init log format: json ensures structured logging per service conventions.
+common_cloud_init_log_format: json
+
+# otelcol-contrib release to install.
+common_otelcol_version: "0.131.0"

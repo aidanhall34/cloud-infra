@@ -1,0 +1,21 @@
+# Packer variable values for the Alpine gateway image build.
+# Copy to gateway.pkrvars.hcl and fill in your values.
+# gateway.pkrvars.hcl is gitignored — never commit credentials.
+
+# ── Alpine base image ─────────────────────────────────────────────────────────
+# Selects the Linode official image used as the build base.
+# Run `linode-cli images list --is-public true` to see available Alpine images.
+
+alpine_version = "3.22"
+
+# ── Build VM ──────────────────────────────────────────────────────────────────
+# Run `linode-cli linodes types` to see available instance types.
+
+instance_type = "g6-nanode-1"
+
+# ── Linode credentials ────────────────────────────────────────────────────────
+# Create a Personal Access Token at: https://cloud.linode.com/profile/tokens
+# Required scope: Images:Read/Write
+
+linode_token  = "your-linode-api-token"
+linode_region = "ap-southeast"

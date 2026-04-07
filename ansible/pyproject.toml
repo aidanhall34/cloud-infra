@@ -4,10 +4,13 @@ version = "0.1.0"
 description = "Ansible automation for homelab infrastructure"
 requires-python = ">=3.13"
 dependencies = [
-    "ansible>=10.0.0",
+    "ansible>=11.0.0",
     "ansible-lint>=25.0.0",
-    "molecule>=25.0.0",
-    "molecule-plugins[docker]>=23.5.0",
+    "molecule>=26.0.0",
+    "molecule-plugins[docker]>=25.0.0",
+    "opentelemetry-api>=1.40.0",
+    "opentelemetry-exporter-otlp>=1.40.0",
+    "opentelemetry-sdk>=1.40.0",
 ]
 
 [dependency-groups]

@@ -1,0 +1,13 @@
+---
+# Gateway image playbook — applied by Packer during the Alpine gateway image build.
+# Installs cloud-init, base packages, otelcol-contrib, and gateway services
+# (WireGuard, Blocky DNS, Nginx).
+
+- name: Configure Alpine gateway image
+  hosts: all
+  gather_facts: false
+  become: false  # Packer connects as root
+
+  roles:
+    - common
+    - gateway

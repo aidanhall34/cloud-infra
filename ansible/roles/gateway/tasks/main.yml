@@ -1,0 +1,134 @@
+---
+# ── Packages ───────────────────────────────────────────────────────────────────
+
+- name: Install gateway packages
+  community.general.apk:
+    name: "{{ gateway_packages }}"
+    state: latest
+    update_cache: true
+
+# ── Kernel: IP forwarding ─────────────────────────────────────────────────────
+# Written once to sysctl.conf; cloud-init applies it with `sysctl -p` at boot.
+
+- name: Enable IPv4 forwarding in sysctl.conf
+  ansible.builtin.lineinfile:
+    path: /etc/sysctl.conf
+    regexp: "^#?net.ipv4.ip_forward"
+    line: "net.ipv4.ip_forward=1"
+    state: present
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+
+# ── WireGuard ─────────────────────────────────────────────────────────────────
+# The wg-quick@wg0 service is started at boot after wireguard-setup.sh writes
+# /etc/wireguard/wg0.conf from the private key injected by cloud-init.
+
+- name: Create WireGuard config directory
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install wg-quick OpenRC init script
+  ansible.builtin.template:
+    src: wg-quick.init.j2
+    dest: /etc/init.d/wg-quick.wg0
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable wg-quick.wg0 at boot
+  rc_update:
+    name: wg-quick.wg0
+    runlevel: default
+    state: present
+
+# ── Blocky DNS ────────────────────────────────────────────────────────────────
+
+- name: Set Blocky release arch
+  ansible.builtin.set_fact:
+    gateway_blocky_arch: x86_64
+
+- name: Create blocky group
+  ansible.builtin.group:
+    name: blocky
+    system: true
+    state: present
+
+- name: Create blocky system user
+  ansible.builtin.user:
+    name: blocky
+    group: blocky
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+    state: present
+
+- name: Create /etc/blocky directory
+  ansible.builtin.file:
+    path: /etc/blocky
+    state: directory
+    owner: blocky
+    group: blocky
+    mode: "0755"
+
+- name: Download Blocky binary
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/0xERR0R/blocky/releases/download/v{{ gateway_blocky_version
+      }}/blocky_v{{ gateway_blocky_version }}_Linux_{{ gateway_blocky_arch }}.tar.gz
+    dest: /tmp/blocky.tar.gz
+    mode: "0644"
+
+- name: Extract Blocky binary
+  ansible.builtin.unarchive:
+    src: /tmp/blocky.tar.gz
+    dest: /usr/local/bin
+    include:
+      - blocky
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Remove Blocky tarball
+  ansible.builtin.file:
+    path: /tmp/blocky.tar.gz
+    state: absent
+
+# Grant CAP_NET_BIND_SERVICE so blocky can bind port 53 without running as root.
+- name: Set CAP_NET_BIND_SERVICE on blocky binary
+  ansible.builtin.command: setcap cap_net_bind_service=+ep /usr/local/bin/blocky
+  changed_when: true
+
+- name: Install Blocky OpenRC init script
+  ansible.builtin.template:
+    src: blocky.init.j2
+    dest: /etc/init.d/blocky
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable Blocky at boot
+  rc_update:
+    name: blocky
+    runlevel: default
+    state: present
+
+- name: Deploy default blocky config (skipped if cloud-init config already present)
+  ansible.builtin.copy:
+    src: blocky-default.yaml
+    dest: /etc/blocky/config.yaml
+    owner: blocky
+    group: blocky
+    mode: "0640"
+    force: false
+
+- name: Validate blocky config
+  ansible.builtin.command:
+    cmd: /usr/local/bin/blocky validate -c /etc/blocky/config.yaml
+  changed_when: false

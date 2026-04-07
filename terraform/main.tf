@@ -2,30 +2,28 @@ terraform {
   required_version = ">= 1.6"
 
   required_providers {
-    oci = {
-      source  = "oracle/oci"
-      version = "~> 6.0"
-    }
-    cloudinit = {
-      source  = "hashicorp/cloudinit"
+    linode = {
+      source  = "linode/linode"
       version = "~> 2.0"
     }
   }
 
-  # OCI Object Storage is S3-compatible.
-  # All config is supplied at init time via: terraform init -backend-config=../secrets/backend.hcl
-  # See terraform/backend.hcl.example for required values and OCI setup instructions.
-  #
-  # One-time bootstrap: the bucket must exist before the first terraform init.
-  # The GitHub Actions workflow creates it automatically (idempotent).
-  # For local first-run: see scripts/bootstrap-state-bucket.sh
-  backend "s3" {}
+  # Credentials are passed via AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars.
+  backend "s3" {
+    bucket = "homelab-tf"
+    key    = "homelab.tfstate"
+    region = "au-mel"
+    endpoints = {
+      s3 = "https://au-mel-1.linodeobjects.com"
+    }
+    skip_credentials_validation = true
+    skip_metadata_api_check     = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+  }
 }
 
-provider "oci" {
-  tenancy_ocid     = var.tenancy_ocid
-  user_ocid        = var.user_ocid
-  fingerprint      = var.fingerprint
-  private_key_path = var.private_key_path
-  region           = var.region
+provider "linode" {
+  token = var.linode_token
 }

@@ -2,6 +2,7 @@
 
 - All recipes will have a comment next to the title describing there function.
 - After a change to the makefile, the README.md file should be updated by running `make readme`.
+- Do not log recipes that generate secrets
 
 # Scripts conventions
 
@@ -10,14 +11,19 @@
 # Docs conventions
 
 - All references to module or function names in documentation should contain a link to starting line in the file of the codes declaration.
+- When a tool is used in a script, make sure that the README.md.tpl file has a link to the tool
+- Validate all links are reachable before including them in documentation
+- Link to the latest relevant commit of repositories
 
 # Service conventions
 
 - All services should be deploy with JSON logging enabled.
+- Services should log to the ./dev/logs directory
 
 # Command execution conventions
 
 - Commands should be run with JSON output
+- Commands should log to the ./dev/logs directory
 
 # Python conventions
 
@@ -43,3 +49,16 @@
 
 - Packer should be validated with `make packer-validate` when changed
 - Packer should be formatted with `make packer-fmt`
+
+# Container conventions
+
+- Containers should log to the ./dev/logs directory.
+- Containers should be version pinned with an environment variable
+
+# Coding conventions
+
+- Code should be `dry`. Where possible, link to files and modules instead of copying.
+
+# CI conventions
+
+- Github actions are used for CI

@@ -1,0 +1,71 @@
+---
+- name: Verify gateway role
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Assert Blocky binary is present
+      ansible.builtin.stat:
+        path: /usr/local/bin/blocky
+      register: gateway_blocky_bin
+      failed_when: not gateway_blocky_bin.stat.exists
+
+    - name: Assert Blocky binary is executable
+      ansible.builtin.stat:
+        path: /usr/local/bin/blocky
+      register: gateway_blocky_exec
+      failed_when: not gateway_blocky_exec.stat.executable
+
+    - name: Assert blocky user exists
+      ansible.builtin.command: id blocky
+      changed_when: false
+
+    - name: Assert /etc/blocky directory exists
+      ansible.builtin.stat:
+        path: /etc/blocky
+      register: gateway_blocky_dir
+      failed_when: not gateway_blocky_dir.stat.exists
+
+    - name: Assert Blocky init script is present
+      ansible.builtin.stat:
+        path: /etc/init.d/blocky
+      register: gateway_blocky_init
+      failed_when: not gateway_blocky_init.stat.exists
+
+    - name: Assert Blocky is enabled in default runlevel
+      ansible.builtin.stat:
+        path: /etc/runlevels/default/blocky
+      register: gateway_blocky_runlevel
+      failed_when: not gateway_blocky_runlevel.stat.exists
+
+    - name: Assert wg-quick.wg0 init script is present
+      ansible.builtin.stat:
+        path: /etc/init.d/wg-quick.wg0
+      register: gateway_wg_init
+      failed_when: not gateway_wg_init.stat.exists
+
+    - name: Assert wg-quick.wg0 is enabled in default runlevel
+      ansible.builtin.stat:
+        path: /etc/runlevels/default/wg-quick.wg0
+      register: gateway_wg_runlevel
+      failed_when: not gateway_wg_runlevel.stat.exists
+
+    - name: Assert /etc/wireguard directory exists with correct permissions
+      ansible.builtin.stat:
+        path: /etc/wireguard
+      register: gateway_wg_dir
+      failed_when: not gateway_wg_dir.stat.exists or gateway_wg_dir.stat.mode != "0700"
+
+    - name: Assert IP forwarding is set in sysctl.conf
+      ansible.builtin.command: grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf
+      changed_when: false
+
+    - name: Assert gateway packages are installed
+      community.general.apk:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - wireguard-tools
+        - bash
+        - iptables
+        - libcap

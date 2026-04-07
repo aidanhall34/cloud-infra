@@ -1,11 +1,11 @@
 ---
 # Base image playbook — applied by Packer during the Alpine image build.
-# Installs cloud-init (latest) and base packages, then configures OCI datasource.
+# Installs cloud-init, base packages, and otelcol-contrib via the common role.
 
 - name: Configure Alpine base image
   hosts: all
   gather_facts: false
-  become: false # Packer connects as root
+  become: false  # Packer connects as root
 
   roles:
-    - base
+    - common

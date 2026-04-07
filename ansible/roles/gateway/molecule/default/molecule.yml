@@ -1,0 +1,41 @@
+---
+# Molecule test suite for the gateway role.
+# Uses the Docker driver with a privileged Alpine container (OpenRC).
+# converge.yml runs common then gateway in sequence.
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../../../requirements.yml
+    collections-path: ../../../../.collections
+
+driver:
+  name: docker
+
+platforms:
+  - name: alpine-gateway
+    image: alpine:latest
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+    command: /sbin/init
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        ansible_python_interpreter: /usr/bin/python3
+
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
+    ANSIBLE_LIBRARY: "${MOLECULE_PROJECT_DIRECTORY}/../../library"
+    ANSIBLE_CONFIG: "${MOLECULE_PROJECT_DIRECTORY}/../../ansible.cfg"
+
+verifier:
+  name: ansible

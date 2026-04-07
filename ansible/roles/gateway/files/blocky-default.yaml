@@ -1,0 +1,26 @@
+# Minimal default blocky config written by the gateway Ansible role.
+# Cloud-init replaces this with the instance-specific config on first boot.
+# This file exists so the binary can be validated during image build.
+
+upstreams:
+  groups:
+    default:
+      - 1.1.1.1
+      - 1.0.0.1
+
+blocking:
+  denylists: {}
+  clientGroupsBlock:
+    default: []
+
+ports:
+  dns: "0.0.0.0:53"
+  http: "0.0.0.0:4000"
+
+prometheus:
+  enable: true
+  path: /metrics
+
+log:
+  level: info
+  format: json

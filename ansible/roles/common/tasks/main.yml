@@ -1,0 +1,215 @@
+---
+# ── Bootstrap ────────────────────────────────────────────────────────────────
+# Raw tasks — run without Python on the target. Required on a fresh Alpine image
+# before any module-based task can execute.
+
+- name: Install python3 and openrc
+  ansible.builtin.raw: apk add --no-cache python3 openrc
+  changed_when: false
+
+- name: Ensure /etc/apk/repositories exists
+  ansible.builtin.raw: test -f /etc/apk/repositories || echo "" > /etc/apk/repositories
+  changed_when: false
+
+- name: Gather facts
+  ansible.builtin.setup:
+
+# ── Package repositories ───────────────────────────────────────────────────────
+
+- name: Enable Alpine main repository
+  ansible.builtin.lineinfile:
+    path: /etc/apk/repositories
+    regexp: "^#?{{ common_alpine_repo_base }}/main"
+    line: "{{ common_alpine_repo_base }}/main"
+    state: present
+
+- name: Enable Alpine community repository
+  ansible.builtin.lineinfile:
+    path: /etc/apk/repositories
+    regexp: "^#?{{ common_alpine_repo_base }}/community"
+    line: "{{ common_alpine_repo_base }}/community"
+    state: present
+
+# ── Packages ───────────────────────────────────────────────────────────────────
+
+- name: Update APK index
+  community.general.apk:
+    update_cache: true
+
+- name: Upgrade all installed packages
+  community.general.apk:
+    upgrade: true
+
+- name: Install common packages
+  community.general.apk:
+    name: "{{ common_packages }}"
+    state: latest
+
+# ── cloud-init (latest) ────────────────────────────────────────────────────────
+
+- name: Install cloud-init
+  community.general.apk:
+    name: cloud-init
+    state: latest
+  notify: Enable cloud-init services
+
+- name: Ensure cloud-init configuration directory exists
+  ansible.builtin.file:
+    path: /etc/cloud
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure cloud-init datasource and logging
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/90_linode.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Linode datasource configuration — applied during Packer base image build.
+      # Linode datasource reads instance metadata from the Linode Metadata API.
+      datasource_list: {{ common_cloud_init_datasources | to_json }}
+
+      output:
+        all: "| tee -a /var/log/cloud-init-output.log"
+
+      logging:
+        version: 1
+        formatters:
+          json:
+            (): cloudinit.log.LogExporter
+            formatter: json
+        handlers:
+          console:
+            class: logging.StreamHandler
+            formatter: "{{ common_cloud_init_log_format }}"
+            stream: ext://sys.stdout
+        root:
+          level: DEBUG
+          handlers: [console]
+
+- name: Configure cloud-init to use Linode datasource in cloud.cfg
+  ansible.builtin.lineinfile:
+    path: /etc/cloud/cloud.cfg
+    regexp: "^datasource_list:"
+    line: "datasource_list: {{ common_cloud_init_datasources | to_json }}"
+    state: present
+
+# ── SSH ────────────────────────────────────────────────────────────────────────
+
+- name: Ensure sshd is enabled at boot
+  rc_update:
+    name: sshd
+    runlevel: default
+    state: present
+
+# ── Clock sync ────────────────────────────────────────────────────────────────
+
+- name: Enable chrony at boot
+  rc_update:
+    name: chronyd
+    runlevel: default
+    state: present
+
+# ── otelcol-contrib ────────────────────────────────────────────────────────────
+# Downloads the pre-built binary tarball (no .deb on Alpine).
+
+- name: Set otelcol release arch
+  ansible.builtin.set_fact:
+    common_otelcol_arch: amd64
+
+- name: Create otelcol-contrib group
+  ansible.builtin.group:
+    name: otelcol-contrib
+    system: true
+    state: present
+
+- name: Create otelcol-contrib user
+  ansible.builtin.user:
+    name: otelcol-contrib
+    group: otelcol-contrib
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+    state: present
+
+- name: Create otelcol-contrib directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: otelcol-contrib
+    group: otelcol-contrib
+    mode: "0755"
+  loop:
+    - /etc/otelcol-contrib
+    - /var/lib/otelcol-contrib/filestore
+
+- name: Download otelcol-contrib tarball
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{
+      common_otelcol_version }}/otelcol-contrib_{{ common_otelcol_version }}_linux_{{
+      common_otelcol_arch }}.tar.gz
+    dest: /tmp/otelcol-contrib.tar.gz
+    mode: "0644"
+
+- name: Extract otelcol-contrib binary
+  ansible.builtin.unarchive:
+    src: /tmp/otelcol-contrib.tar.gz
+    dest: /usr/local/bin
+    include:
+      - otelcol-contrib
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Remove otelcol-contrib tarball
+  ansible.builtin.file:
+    path: /tmp/otelcol-contrib.tar.gz
+    state: absent
+
+- name: Install otelcol-contrib OpenRC init script
+  ansible.builtin.template:
+    src: otelcol-contrib.init.j2
+    dest: /etc/init.d/otelcol-contrib
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable otelcol-contrib at boot
+  rc_update:
+    name: otelcol-contrib
+    runlevel: default
+    state: present
+
+- name: Deploy default otelcol-contrib config (skipped if cloud-init config already present)
+  ansible.builtin.copy:
+    src: otelcol-contrib-default.yaml
+    dest: /etc/otelcol-contrib/config.yaml
+    owner: otelcol-contrib
+    group: otelcol-contrib
+    mode: "0640"
+    force: false
+
+- name: Validate otelcol-contrib config
+  ansible.builtin.command:
+    cmd: /usr/local/bin/otelcol-contrib validate --config=file:/etc/otelcol-contrib/config.yaml
+  changed_when: false
+
+# ── Clean up ──────────────────────────────────────────────────────────────────
+
+- name: Remove APK cache to reduce image size
+  ansible.builtin.file:
+    path: /var/cache/apk
+    state: absent
+
+- name: Recreate empty APK cache directory
+  ansible.builtin.file:
+    path: /var/cache/apk
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

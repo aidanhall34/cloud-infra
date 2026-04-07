@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 # Add the library directory to sys.path so the module can be imported
 # without a full Ansible installation providing the package structure.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "roles", "base", "library"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "library"))
 
 
 # ---------------------------------------------------------------------------

@@ -5,4 +5,5 @@ __pycache__
 .ansible
 .pytest_cache
 .ruff_cache
-packer/*.pkrvars.hcl
+packer/**/*.pkrvars.hcl
+dev/logs/*.log

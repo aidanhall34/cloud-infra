@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
-# Uploads all required secrets to a GitHub repository.
+# Uploads all required GitHub Actions secrets for this repository.
 #
 # Requirements:
-#   - gh CLI installed and authenticated: https://cli.github.com/
-#   - Run: gh auth login   (if not already authenticated)
-#   - secrets/ directory populated (run scripts/generate-secrets.sh first)
-#   - ~/.oci/oci_api_key.pem present
+#   gh CLI installed and authenticated (run: gh auth login)
 #
 # Usage:
-#   ./scripts/upload-secrets.sh                        # uses current repo
-#   ./scripts/upload-secrets.sh owner/repo-name        # explicit repo
-#
-# Secrets uploaded:
-#   OCI credentials     → from interactive prompts (not stored in files)
-#   WireGuard keys      → from secrets/ directory
-#   State backend       → from interactive prompts
+#   ./scripts/upload-secrets.sh                  # uses current repo
+#   ./scripts/upload-secrets.sh owner/repo-name  # explicit repo
 
 set -euo pipefail
 
@@ -53,100 +45,61 @@ prompt() {
     read -rsp "  $label: " "$var_name"
     echo
   else
-    read -rp  "  $label: " "$var_name"
+    read -rp "  $label: " "$var_name"
   fi
 }
 
-# ── WireGuard keys ────────────────────────────────────────────────────────────
+# ── Discord ───────────────────────────────────────────────────────────────────
 
 echo ""
-echo "── WireGuard keys ────────────────────────────────────────────────────────"
-upload_file WG_GATEWAY_PRIVATE_KEY "$SECRETS_DIR/wireguard_gateway_private.key"
-upload_file WG_GATEWAY_PUBLIC_KEY  "$SECRETS_DIR/wireguard_gateway_public.key"
+echo "── Discord ───────────────────────────────────────────────────────────────"
+echo "  Create a webhook at: Server Settings → Integrations → Webhooks"
+echo ""
+prompt discord_webhook_url "DISCORD_WEBHOOK_URL"
+upload_value DISCORD_WEBHOOK_URL "$discord_webhook_url"
 
-if grep -q '^#' "$SECRETS_DIR/wireguard_mikrotik_public.key" 2>/dev/null; then
-  echo "  SKIP WG_MIKROTIK_PUBLIC_KEY — placeholder not yet filled in"
-  echo "       Edit secrets/wireguard_mikrotik_public.key with the MikroTik public key,"
-  echo "       then re-run this script."
-else
-  upload_file WG_MIKROTIK_PUBLIC_KEY "$SECRETS_DIR/wireguard_mikrotik_public.key"
-fi
-
-# ── Grafana ───────────────────────────────────────────────────────────────────
+# ── Linode API ────────────────────────────────────────────────────────────────
 
 echo ""
-echo "── Grafana GitHub OAuth ──────────────────────────────────────────────────"
-if grep -q '^#' "$SECRETS_DIR/grafana_github_client_id" 2>/dev/null; then
-  echo "  SKIP GRAFANA_GITHUB_CLIENT_ID — placeholder not yet filled in"
-  echo "       Run: scripts/setup-github-oauth.sh"
-else
-  upload_file GRAFANA_GITHUB_CLIENT_ID     "$SECRETS_DIR/grafana_github_client_id"
-  upload_file GRAFANA_GITHUB_CLIENT_SECRET "$SECRETS_DIR/grafana_github_client_secret"
-fi
-upload_file GRAFANA_SECRET_KEY "$SECRETS_DIR/grafana_secret_key"
+echo "── Linode API ────────────────────────────────────────────────────────────"
+echo "  Create a token with full access at: https://cloud.linode.com/profile/tokens"
+echo "  Or scope it minimally: linodes:read_write images:read_write firewall:read_write"
+echo ""
+prompt linode_token "LINODE_TOKEN" silent
+upload_value LINODE_TOKEN "$linode_token"
 
-# ── OCI API key ───────────────────────────────────────────────────────────────
+# ── Terraform — gateway ───────────────────────────────────────────────────────
 
 echo ""
-echo "── OCI API key ───────────────────────────────────────────────────────────"
-OCI_KEY_FILE="${OCI_KEY_FILE:-$HOME/.oci/oci_api_key.pem}"
-if [ ! -f "$OCI_KEY_FILE" ]; then
-  echo "  OCI API private key not found at $OCI_KEY_FILE"
-  prompt OCI_KEY_FILE "Path to OCI API private key (.pem)"
-fi
-upload_file OCI_API_PRIVATE_KEY "$OCI_KEY_FILE"
+echo "── Terraform — gateway ───────────────────────────────────────────────────"
+echo ""
+prompt ssh_public_key   "TF_SSH_PUBLIC_KEY   (contents of ~/.ssh/id_ed25519.pub)"
+prompt allowed_ip_range "TF_ALLOWED_IP_RANGE (your home CIDR, e.g. 203.0.113.1/32)"
 
-# ── OCI account credentials ───────────────────────────────────────────────────
+upload_value TF_SSH_PUBLIC_KEY   "$ssh_public_key"
+upload_value TF_ALLOWED_IP_RANGE "$allowed_ip_range"
+
+# ── Terraform state backend (Linode Object Storage) ───────────────────────────
 
 echo ""
-echo "── OCI account credentials ───────────────────────────────────────────────"
-echo "  Find these at: OCI Console → Profile (top-right)"
-echo ""
-prompt tenancy_ocid     "OCI_TENANCY_OCID     (Profile → Tenancy)"
-prompt user_ocid        "OCI_USER_OCID        (Profile → User Settings)"
-prompt fingerprint      "OCI_FINGERPRINT      (User Settings → API Keys → fingerprint)"
-prompt compartment_ocid "OCI_COMPARTMENT_OCID (same as tenancy OCID for root compartment)"
-prompt ssh_public_key   "SSH_PUBLIC_KEY       (contents of ~/.ssh/id_ed25519.pub)"
-
-upload_value OCI_TENANCY_OCID     "$tenancy_ocid"
-upload_value OCI_USER_OCID        "$user_ocid"
-upload_value OCI_FINGERPRINT      "$fingerprint"
-upload_value OCI_COMPARTMENT_OCID "$compartment_ocid"
-upload_value SSH_PUBLIC_KEY       "$ssh_public_key"
-
-# ── Telemetry S3 credentials ─────────────────────────────────────────────────
-
-echo ""
-echo "── Telemetry S3 credentials (OCI Customer Secret Keys) ──────────────────"
-echo "  Used by Loki, Tempo, and VictoriaMetrics (vmbackup/vmrestore)."
-echo "  OCI Console → Profile → User Settings → Customer Secret Keys → Generate Secret Key."
-echo ""
-if grep -q '^#' "$SECRETS_DIR/telemetry_s3_access_key" 2>/dev/null; then
-  echo "  SKIP TELEMETRY_S3_ACCESS_KEY — placeholder not yet filled in"
-  echo "       Edit secrets/telemetry_s3_access_key with the Customer Secret Key access key."
-else
-  upload_file TELEMETRY_S3_ACCESS_KEY "$SECRETS_DIR/telemetry_s3_access_key"
-  upload_file TELEMETRY_S3_SECRET_KEY "$SECRETS_DIR/telemetry_s3_secret_key"
-fi
-
-# ── Terraform state backend ───────────────────────────────────────────────────
-
-echo ""
-echo "── Terraform state backend (OCI Object Storage S3) ──────────────────────"
+echo "── Terraform state backend (Linode Object Storage) ──────────────────────"
 echo "  Setup steps (if not done already):"
-echo "    1. OCI Console → Object Storage → Buckets → Create Bucket"
-echo "       Name: terraform-state  |  Region: ap-sydney-1  |  Visibility: Private"
-echo "    2. Get namespace: shown in the Object Storage page header"
-echo "    3. Profile → User Settings → Customer Secret Keys → Generate Secret Key"
-echo "       Copy the secret value immediately — it won't be shown again."
+echo "    1. Create a bucket: https://cloud.linode.com/object-storage/buckets"
+echo "    2. Generate access keys: https://cloud.linode.com/object-storage/access-keys"
 echo ""
-prompt tf_state_namespace  "OCI namespace        (shown in Object Storage page header)"
-prompt tf_state_access_key "TF_STATE_ACCESS_KEY  (Customer Secret Key — Access Key field)"
-prompt tf_state_secret_key "TF_STATE_SECRET_KEY  (Customer Secret Key — Secret value)" silent
+echo "  Cluster IDs by region:"
+echo "    ap-southeast  → ap-southeast-1"
+echo "    us-east       → us-east-1"
+echo "    eu-central    → eu-central-1"
+echo ""
+prompt tf_state_bucket     "TF_STATE_BUCKET     (bucket name)"
+prompt tf_state_region     "TF_STATE_REGION     (cluster ID, e.g. ap-southeast-1)"
+prompt tf_state_endpoint   "TF_STATE_ENDPOINT   (e.g. ap-southeast-1.linodeobjects.com)"
+prompt tf_state_access_key "TF_STATE_ACCESS_KEY (access key)"
+prompt tf_state_secret_key "TF_STATE_SECRET_KEY (secret key)" silent
 
-tf_state_endpoint="https://${tf_state_namespace}.compat.objectstorage.ap-sydney-1.oraclecloud.com"
-echo "  Endpoint: $tf_state_endpoint"
-
+upload_value TF_STATE_BUCKET     "$tf_state_bucket"
+upload_value TF_STATE_REGION     "$tf_state_region"
 upload_value TF_STATE_ENDPOINT   "$tf_state_endpoint"
 upload_value TF_STATE_ACCESS_KEY "$tf_state_access_key"
 upload_value TF_STATE_SECRET_KEY "$tf_state_secret_key"
@@ -158,10 +111,7 @@ echo "── Done ────────────────────�
 echo "  All secrets uploaded."
 echo ""
 echo "  Next steps:"
-echo "    1. Fill in secrets/wireguard_mikrotik_public.key (once MikroTik is configured)"
-echo "       then re-run this script to upload WG_MIKROTIK_PUBLIC_KEY."
-echo "    2. Go to GitHub → Actions → Deploy Infrastructure → Run workflow"
-echo "       Choose 'plan' first to validate, then 'apply' to provision."
+echo "    1. Build the gateway image:  make linode-packer-token && make packer-build-gateway"
+echo "    2. Deploy infrastructure:    make linode-deploy-token && make tf-init tf-plan tf-apply"
+echo "    3. Or push to main and let CI do it automatically."
 echo ""
-echo "  Gateway WireGuard public key (for MikroTik peer config):"
-cat "$SECRETS_DIR/wireguard_gateway_public.key"

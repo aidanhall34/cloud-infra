@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+# OpenRC init script for otelcol-contrib (OpenTelemetry Collector Contrib).
+# Config is written by cloud-init to /etc/otelcol-contrib/config.yaml.
+
+description="OpenTelemetry Collector Contrib"
+
+command=/usr/local/bin/otelcol-contrib
+command_args="--config /etc/otelcol-contrib/config.yaml"
+command_user="otelcol-contrib:otelcol-contrib"
+command_background=true
+pidfile=/run/otelcol-contrib.pid
+output_log=/var/log/otelcol-contrib.log
+error_log=/var/log/otelcol-contrib.log
+
+depend() {
+    need net
+    after cloud-final
+}

@@ -1,0 +1,9 @@
+---
+# python3, openrc, and /etc/apk/repositories bootstrap are handled by the
+# common role (tasks/main.yml) — no longer needed here.
+# The community repo must be pre-seeded so package installs in the test
+# container succeed before the common role's lineinfile tasks run.
+- name: Prepare Alpine container for gateway role
+  hosts: all
+  gather_facts: false
+  tasks: []

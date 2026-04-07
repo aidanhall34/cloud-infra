@@ -1,0 +1,10 @@
+---
+# Blocky DNS release to install.
+gateway_blocky_version: "0.29.0"
+
+# Packages installed on the gateway image.
+gateway_packages:
+  - wireguard-tools
+  - bash
+  - iptables
+  - libcap

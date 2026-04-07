@@ -1,0 +1,77 @@
+name: terraform-apply
+
+on:
+  # Automatically triggered after a successful terraform-plan run on main.
+  workflow_run:
+    workflows:
+      - terraform-plan
+    types:
+      - completed
+    branches:
+      - main
+  # Manual trigger — useful for re-deploying without a code change.
+  workflow_dispatch:
+
+# Queue deploys rather than cancelling — only one deploy runs at a time.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: deploy
+    # For workflow_run: only deploy if the plan succeeded and it ran on main.
+    # For workflow_dispatch: always proceed (operator has explicitly triggered it).
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    # Secrets available from the deploy environment — set at job level so all
+    # steps share them without repeating the env block.
+    env:
+      LINODE_CLI_TOKEN:            ${{ secrets.LINODE_TOKEN }}
+      TF_VAR_ssh_public_key:       ${{ secrets.TF_SSH_PUBLIC_KEY }}
+      TF_VAR_allowed_ip_range:     ${{ secrets.TF_ALLOWED_IP_RANGE }}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
+    steps:
+      # Check out the exact commit that passed terraform-plan (or HEAD for manual runs).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Record start time
+        id: start
+        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python venvs
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
+
+      - name: Terraform init
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-init
+
+      - name: Terraform plan
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-plan
+
+      - name: Terraform deploy
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-deploy
+
+      - name: Notify Discord
+        if: always()
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "terraform-apply — ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}"
+          job-start-time: ${{ steps.start.outputs.ts }}
+          run-id: ${{ github.run_id }}
+          run-number: ${{ github.run_number }}
+          repo: ${{ github.repository }}
