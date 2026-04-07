@@ -44,7 +44,7 @@ jobs:
 
       - name: Build gateway image
         env:
-          LINODE_CLI_TOKEN:            ${{ secrets.LINODE_TOKEN }}
+          LINODE_CLI_TOKEN: ${{ secrets.LINODE_TOKEN }}
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} packer-build-gateway
 

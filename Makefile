@@ -242,7 +242,7 @@ ci-packer-build: ## Run the packer-build workflow locally via act (simulates pus
 ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MIKROTIK_USERNAME, MIKROTIK_PASSWORD, MIKROTIK_WG_GATEWAY_ENDPOINT)
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act workflow_dispatch --json --eventpath .github/act/molecule-gateway.json $(ACT_FLAGS) \
+	  act workflow_dispatch --json --eventpath .github/act/molecule.json $(ACT_FLAGS) \
 	  --secret MIKROTIK_HOST="$(MIKROTIK_HOST)" \
 	  --secret MIKROTIK_USERNAME="$(MIKROTIK_USERNAME)" \
 	  --secret MIKROTIK_PASSWORD="$(MIKROTIK_PASSWORD)" \
