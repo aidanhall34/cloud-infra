@@ -17,9 +17,8 @@ The app needs the following [repository permissions](https://docs.github.com/en/
 
 | Permission | Level | Reason |
 |---|---|---|
-| **Contents** | Read | Check out `cloud-infra` source code from `homelab-deploy` runners |
-| **Commit statuses** | Read & write | Post `packer-build`, `terraform-plan`, `terraform-apply` status checks back to `cloud-infra` commits |
-| **Actions** | Read & write | Send `repository_dispatch` events to `homelab-deploy` from `cloud-infra` workflows |
+| **Contents** | Read & write | Check out `cloud-infra` source code; send `repository_dispatch` events to `homelab-deploy` (requires write) |
+| **Commit statuses** | Read & write | Post `packer-build`, `terraform-plan`, `terraform-apply` status checks back to `cloud-infra` commits; read status for pre-flight checks |
 
 ---
 
@@ -36,9 +35,8 @@ The app needs the following [repository permissions](https://docs.github.com/en/
    | **Webhook** | Uncheck **Active** — this app does not need webhooks |
 
 3. Under **Repository permissions**, set:
-   - **Contents** → `Read-only`
+   - **Contents** → `Read and write`
    - **Commit statuses** → `Read and write`
-   - **Actions** → `Read and write`
 
    All other permissions can remain `No access`.
 

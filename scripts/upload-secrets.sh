@@ -3,6 +3,8 @@
 #
 # Requirements:
 #   gh CLI installed and authenticated (run: gh auth login)
+#   linode-cli authenticated (run: make linode-login)
+#   uv installed with scripts/ venv synced (run: make setup)
 #   Both aidanhall34/cloud-infra and aidanhall34/homelab-deploy must be accessible.
 #
 # Usage:
@@ -15,6 +17,7 @@ set -euo pipefail
 
 CLOUD_INFRA_REPO="aidanhall34/cloud-infra"
 DEPLOY_REPO="aidanhall34/homelab-deploy"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -45,6 +48,21 @@ prompt() {
   fi
 }
 
+linode_token_create() {
+  local label="$1"
+  local scopes="$2"
+  local expiry
+  expiry=$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%S')
+  local token
+  token=$(uv run --directory "$SCRIPT_DIR" linode-cli profile token-create \
+      --label "$label" \
+      --scopes "$scopes" \
+      --expiry "$expiry" \
+      --json 2>/dev/null \
+    | python3 -c "import sys,json; print(json.loads(sys.stdin.read())[0]['token'])")
+  printf '%s' "$token"
+}
+
 # ── Discord ───────────────────────────────────────────────────────────────────
 # Uploaded to both repos — cloud-infra uses it for molecule notifications,
 # homelab-deploy uses it for packer/terraform notifications.
@@ -57,15 +75,28 @@ prompt discord_webhook_url "DISCORD_WEBHOOK_URL"
 upload_to_both DISCORD_WEBHOOK_URL "$discord_webhook_url"
 
 # ── Linode API ────────────────────────────────────────────────────────────────
-# homelab-deploy only — cloud-infra no longer runs builds directly.
+# Uses the authenticated linode-cli session to generate two scoped tokens:
+#   LINODE_PACKER_TOKEN — used by packer-build to mint short-lived build tokens
+#   LINODE_TF_TOKEN     — used by terraform-plan/apply to mint short-lived infra tokens
+# Both tokens include account:read_write so they can mint and revoke child tokens.
+# Both expire after 2 hours — re-run this script to rotate them.
 
 echo ""
 echo "── Linode API ────────────────────────────────────────────────────────────"
-echo "  Create a token with full access at: https://cloud.linode.com/profile/tokens"
-echo "  Or scope it minimally: linodes:read_write images:read_write firewall:read_write"
+echo "  Generating scoped tokens via authenticated linode-cli session..."
+echo "  (run 'make linode-login' first if not already authenticated)"
 echo ""
-prompt linode_token "LINODE_TOKEN" silent
-upload_to "$DEPLOY_REPO" LINODE_TOKEN "$linode_token"
+echo "  Generating LINODE_PACKER_TOKEN..."
+linode_packer_token=$(linode_token_create \
+  "homelab-packer" \
+  "account:read_write linodes:read_write images:read_write events:read_only")
+upload_to "$DEPLOY_REPO" LINODE_PACKER_TOKEN "$linode_packer_token"
+
+echo "  Generating LINODE_TF_TOKEN..."
+linode_tf_token=$(linode_token_create \
+  "homelab-terraform" \
+  "account:read_write linodes:read_write firewall:read_write events:read_only images:read_only object_storage:read_write")
+upload_to "$DEPLOY_REPO" LINODE_TF_TOKEN "$linode_tf_token"
 
 # ── Terraform — gateway ───────────────────────────────────────────────────────
 # homelab-deploy only.
@@ -97,7 +128,9 @@ echo "  All secrets uploaded."
 echo ""
 echo "  Next steps:"
 echo "    1. Configure GitHub App credentials:  make configure-github-app"
-echo "    2. Configure deploy environment:      make configure-deploy-environment"
-echo "    3. Create the Terraform state bucket: make tf-init-bucket"
-echo "    4. Push to main — CI will build the image and deploy automatically."
+echo "    2. Create the Terraform state bucket: make tf-init-bucket"
+echo "    3. Push to main — CI will build the image and deploy automatically."
+echo ""
+echo "  Note: LINODE_PACKER_TOKEN and LINODE_TF_TOKEN expire in 2 hours."
+echo "  Re-run this script to rotate them before the next CI run."
 echo ""
