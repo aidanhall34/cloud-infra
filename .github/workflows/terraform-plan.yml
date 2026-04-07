@@ -7,8 +7,10 @@ on:
       - packer-build
     types:
       - completed
-  # Also triggered directly on pushes that touch only terraform (no packer/ansible changes).
+  # Also triggered directly on pushes to main that touch only terraform (no packer/ansible changes).
   push:
+    branches:
+      - main
     paths:
       - "terraform/**"
       - ".github/workflows/terraform-plan.yml"

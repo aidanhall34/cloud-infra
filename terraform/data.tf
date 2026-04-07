@@ -1,5 +1,5 @@
 # Automatically resolves the latest private gateway image produced by `make packer-build-gateway`.
-# Images are labelled `alpine-gateway-<timestamp>` — the newest one is selected.
+# Images are labelled `alpine-gateway-<alpine_version>-<git_sha>` — the newest one is selected.
 data "linode_images" "gateway" {
   latest = true
 

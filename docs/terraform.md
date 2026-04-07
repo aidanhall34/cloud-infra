@@ -4,41 +4,34 @@ All Terraform configuration lives under [`terraform/`](../terraform/).
 
 ## Overview
 
-A single Linode instance (`vm-gateway`) is provisioned in `ap-southeast` (Singapore) with a firewall that only accepts inbound traffic from a configured IP range.
+A single Linode instance (`gateway`) is provisioned in `ap-southeast` (Singapore) with a firewall that only accepts inbound traffic from a configured IP range.
 
 | Resource | Type | Role |
 |---|---|---|
 | `gateway` | Linode g6-nanode-1 (x86_64) | WireGuard VPN, Blocky DNS, Nginx, otelcol-contrib |
 | `firewall` | Linode Cloud Firewall | DROP all inbound except `var.allowed_ip_range`; ACCEPT all outbound |
 
-The gateway is deployed from a custom Alpine image built by Packer (`make packer-build-gateway`).
+The gateway is deployed from the latest custom Alpine image built by Packer (`make packer-build-gateway`). The image is resolved automatically at plan time via a data source — no image ID variable is required.
 
 ---
 
 ## First-time Setup
 
 ```bash
-# 1. Build the gateway image and note its Linode image ID:
+# 1. Create the Terraform state bucket in Linode Object Storage (idempotent — skips if already exists):
+make tf-init-bucket
+
+# 2. Copy and populate the variable values:
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# edit terraform/terraform.tfvars  (set ssh_public_key, allowed_ip_range, etc.)
+
+# 3. Build the gateway image (must run before plan — the data source resolves it at plan time):
 make packer-build-gateway
 
-# 2. Create a Terraform backend bucket in Linode Object Storage (one-time, manual):
-#    https://cloud.linode.com/object-storage/buckets
-
-# 3. Copy and populate the backend config:
-cp terraform/backend.hcl.example secrets/backend.hcl
-# edit secrets/backend.hcl
-
-# 4. Copy and populate the variable values:
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# edit terraform/terraform.tfvars  (set gateway_image, ssh_public_key, allowed_ip_range, etc.)
-
-# 5. Generate a deploy token (24-hour expiry):
-make linode-deploy-token   # copy the token value into terraform.tfvars or TF_VAR_linode_token
-
-# 6. Initialise and deploy:
+# 4. Initialise, plan, and deploy — temporary Linode tokens and OBJ keys are created automatically:
 make tf-init
 make tf-plan
-make tf-apply
+make tf-deploy
 ```
 
 ---
@@ -52,10 +45,22 @@ Declares the required Terraform version (≥ 1.6), the `linode/linode` provider,
 | Block | Notes |
 |---|---|
 | `terraform {}` | Version constraint + provider requirements |
-| `backend "s3" {}` | Config supplied at `terraform init -backend-config=../secrets/backend.hcl` |
+| `backend "s3" {}` | Bucket, endpoint, and region are hardcoded; access keys are injected at runtime via `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars |
 | `provider "linode"` | Authenticated via `var.linode_token` |
 
-Backend config values (endpoint, access/secret keys) are not stored in the repository. See [`terraform/backend.hcl.example`](../terraform/backend.hcl.example) for the required keys.
+Backend credentials are never stored in the repository. `make tf-init`, `make tf-plan`, and `make tf-deploy` each create a short-lived OBJ key automatically and delete it on exit.
+
+---
+
+### [`data.tf`](../terraform/data.tf)
+
+Resolves the latest gateway image at plan time.
+
+| Data source | Notes |
+|---|---|
+| `linode_images.gateway` | Filters private images whose label contains `alpine-gateway-`, selects the newest (`latest = true`) |
+
+Images are labelled `alpine-gateway-<alpine_version>-<git_sha>` by Packer. Running `make packer-build-gateway` before `make tf-plan` ensures the latest image is picked up automatically.
 
 ---
 
@@ -66,7 +71,6 @@ Backend config values (endpoint, access/secret keys) are not stored in the repos
 | `linode_token` | string | — | API token (sensitive). Set via `TF_VAR_linode_token` or `terraform.tfvars` |
 | `linode_region` | string | `ap-southeast` | Linode region |
 | `instance_type` | string | `g6-nanode-1` | Linode plan for the gateway |
-| `gateway_image` | string | — | Linode image ID from Packer (e.g. `private/12345678`) |
 | `ssh_public_key` | string | — | SSH public key injected into the instance |
 | `allowed_ip_range` | string | — | CIDR block that may send inbound traffic (all else is DROPped) |
 
@@ -88,7 +92,7 @@ To temporarily unlock access from a different IP without re-running Terraform, e
 
 | Resource | Notes |
 |---|---|
-| `linode_instance.gateway` | Deployed from `var.gateway_image`, `create_before_destroy = true` |
+| `linode_instance.gateway` | Image resolved from `data.linode_images.gateway`, `create_before_destroy = true` |
 
 ---
 
@@ -105,15 +109,14 @@ To temporarily unlock access from a different IP without re-running Terraform, e
 
 Sensitive values follow this hierarchy — never commit any of these files:
 
-| File | Purpose |
+| File / env var | Purpose |
 |---|---|
-| `secrets/backend.hcl` | Linode Object Storage bucket + access keys for remote state |
-| `terraform/terraform.tfvars` | All variable overrides including `linode_token` |
-
-Alternatively, export `TF_VAR_linode_token` in your shell to avoid writing the token to disk.
+| `terraform/terraform.tfvars` | Variable overrides: `linode_token`, `ssh_public_key`, `allowed_ip_range` |
+| `TF_VAR_linode_token` | Alternative to tfvars — avoids writing the token to disk |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | OBJ backend credentials — injected automatically by `make tf-*` targets, never stored |
 
 ---
 
 ## Updating this Document
 
-When a resource is added, removed, or its line changes materially, update the relevant table row. The convention is `[filename:N](../path/to/file#LN)` which renders as a clickable GitHub link.
+When a resource is added, removed, or its role changes materially, update the relevant table row. The convention is `[filename:N](../path/to/file#LN)` which renders as a clickable GitHub link.
