@@ -316,12 +316,21 @@ generate-grafana-key: ## Generate a new Grafana session signing key (secrets/gra
 ## Setup
 
 .PHONY: setup
-setup: ## Install all Python dependencies (ansible/ and scripts/ virtual environments)
+setup: install-hooks ## Install all Python dependencies (ansible/ and scripts/ virtual environments) and git hooks
 	@mkdir -p $(LOG_DIR)
 	@{ cd $(ANSIBLE_DIR) && uv sync; } $(L)
 	@{ cd $(SCRIPTS_DIR) && uv sync; } $(L)
 
+.PHONY: install-hooks
+install-hooks: ## Write .git/hooks/pre-commit and make it executable
+	@printf '#!/usr/bin/env sh\nexec make pre-commit\n' > .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Installed .git/hooks/pre-commit"
+
 ## Linting
+
+.PHONY: pre-commit
+pre-commit: lint ansible-pytest ## Run all linters and unit tests (invoked by the git pre-commit hook)
 
 .PHONY: lint
 lint: lint-python ansible-lint tf-lint packer-validate otelcol-validate prometheus-validate blocky-validate ## Run all linters and validators (tf-validate excluded: requires terraform init)
