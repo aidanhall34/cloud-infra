@@ -27,6 +27,8 @@ jobs:
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
       - name: Run unit tests
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} ansible-pytest
 
       - name: Notify Discord

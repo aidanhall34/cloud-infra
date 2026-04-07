@@ -37,10 +37,13 @@ BLOCKY_VERSION     := 0.29.0
 # OTEL endpoint for local tools. Override in the environment if needed.
 # Inside act containers this is overridden to host.docker.internal via ACT_FLAGS.
 # In GitHub Actions set OTEL_EXPORTER_OTLP_ENDPOINT as a secret/env var.
-OTEL_ENDPOINT ?= http://localhost:4318
+OTEL_ENDPOINT ?= http://localhost:4317
 
-# Env vars prepended to Terraform commands to enable OTLP traces + metrics.
+# Env vars prepended to commands that support OTLP traces + metrics.
+# Uses gRPC (port 4317) for all local tools — consistent with act containers.
+# In GitHub Actions set OTEL_EXPORTER_OTLP_ENDPOINT as a secret/env var.
 OTEL_ENV := OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp \
+            OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
             OTEL_EXPORTER_OTLP_ENDPOINT=$(OTEL_ENDPOINT)
 
 # act: use the medium-sized runner image and inject the GitHub token via gh CLI.
@@ -326,8 +329,8 @@ generate-grafana-key: ## Generate a new Grafana session signing key (secrets/gra
 .PHONY: setup
 setup: install-hooks ## Install all Python dependencies (ansible/ and scripts/ virtual environments) and git hooks
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(ANSIBLE_DIR) && uv sync; } $(L)
-	@{ cd $(SCRIPTS_DIR) && uv sync; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv sync --all-groups; } $(L)
+	@{ cd $(SCRIPTS_DIR) && uv sync --all-groups; } $(L)
 
 .PHONY: install-hooks
 install-hooks: ## Write .git/hooks/pre-commit and make it executable
@@ -341,13 +344,23 @@ install-hooks: ## Write .git/hooks/pre-commit and make it executable
 pre-commit: lint ansible-pytest ## Run all linters and unit tests (invoked by the git pre-commit hook)
 
 .PHONY: lint
-lint: lint-python ansible-lint tf-lint packer-validate otelcol-validate prometheus-validate blocky-validate ## Run all linters and validators (tf-validate excluded: requires terraform init)
+lint: lint-python mypy-scripts mypy-ansible ansible-lint tf-lint packer-validate otelcol-validate prometheus-validate blocky-validate ## Run all linters and validators (tf-validate excluded: requires terraform init)
 
 .PHONY: lint-python
 lint-python: ## Lint all Python code with ruff (scripts/ and ansible/)
 	@mkdir -p $(LOG_DIR)
 	@{ cd $(SCRIPTS_DIR) && uv run --active ruff check .; } $(L)
 	@{ cd $(ANSIBLE_DIR) && uv run --active ruff check .; } $(L)
+
+.PHONY: mypy-scripts
+mypy-scripts: ## Type-check scripts/ with mypy — files discovered via scripts/pyproject.toml
+	@mkdir -p $(LOG_DIR)
+	@{ cd $(SCRIPTS_DIR) && uv run --active mypy .; } $(L)
+
+.PHONY: mypy-ansible
+mypy-ansible: ## Type-check ansible/library and ansible/tests with mypy — files discovered via ansible/pyproject.toml
+	@mkdir -p $(LOG_DIR)
+	@{ cd $(ANSIBLE_DIR) && uv run --active mypy .; } $(L)
 
 ## Ansible
 
@@ -376,7 +389,7 @@ ansible-molecule-common: ## Run molecule integration tests for the common role
 .PHONY: ansible-pytest
 ansible-pytest: ## Run pytest unit tests for custom Ansible modules
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(ANSIBLE_DIR) && uv run --active pytest tests/unit/ -v; } $(L)
+	@{ cd $(ANSIBLE_DIR) && $(OTEL_ENV) uv run --active pytest tests/unit/ -v; } $(L)
 
 .PHONY: ansible-doc
 ansible-doc: ## Generate documentation for all custom Ansible modules into docs/ansible-modules/
@@ -530,16 +543,6 @@ dev-logs: ## Tail logs from all development stack services
 
 # 10.10.10.1/32
 # ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINigPbjmFlc9mo5BKilyy+spKcvXRLJLRidEcBLIX4Vp aidanhall34
-## Scripts container
-
-.PHONY: build
-build: ## Build the scripts container image (aidanhall34/homelab:latest)
-	@mkdir -p $(LOG_DIR)
-	@{ docker build \
-		--progress rawjson \
-		-t aidanhall34/homelab:latest \
-		$(SCRIPTS_DIR); } $(L)
-
 ## Documentation
 
 .PHONY: readme

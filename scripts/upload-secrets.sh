@@ -79,31 +79,6 @@ prompt allowed_ip_range "TF_ALLOWED_IP_RANGE (your home CIDR, e.g. 203.0.113.1/3
 upload_value TF_SSH_PUBLIC_KEY   "$ssh_public_key"
 upload_value TF_ALLOWED_IP_RANGE "$allowed_ip_range"
 
-# ── Terraform state backend (Linode Object Storage) ───────────────────────────
-
-echo ""
-echo "── Terraform state backend (Linode Object Storage) ──────────────────────"
-echo "  Setup steps (if not done already):"
-echo "    1. Create a bucket: https://cloud.linode.com/object-storage/buckets"
-echo "    2. Generate access keys: https://cloud.linode.com/object-storage/access-keys"
-echo ""
-echo "  Cluster IDs by region:"
-echo "    ap-southeast  → ap-southeast-1"
-echo "    us-east       → us-east-1"
-echo "    eu-central    → eu-central-1"
-echo ""
-prompt tf_state_bucket     "TF_STATE_BUCKET     (bucket name)"
-prompt tf_state_region     "TF_STATE_REGION     (cluster ID, e.g. ap-southeast-1)"
-prompt tf_state_endpoint   "TF_STATE_ENDPOINT   (e.g. ap-southeast-1.linodeobjects.com)"
-prompt tf_state_access_key "TF_STATE_ACCESS_KEY (access key)"
-prompt tf_state_secret_key "TF_STATE_SECRET_KEY (secret key)" silent
-
-upload_value TF_STATE_BUCKET     "$tf_state_bucket"
-upload_value TF_STATE_REGION     "$tf_state_region"
-upload_value TF_STATE_ENDPOINT   "$tf_state_endpoint"
-upload_value TF_STATE_ACCESS_KEY "$tf_state_access_key"
-upload_value TF_STATE_SECRET_KEY "$tf_state_secret_key"
-
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
@@ -111,7 +86,7 @@ echo "── Done ────────────────────�
 echo "  All secrets uploaded."
 echo ""
 echo "  Next steps:"
-echo "    1. Build the gateway image:  make linode-packer-token && make packer-build-gateway"
-echo "    2. Deploy infrastructure:    make linode-deploy-token && make tf-init tf-plan tf-apply"
-echo "    3. Or push to main and let CI do it automatically."
+echo "    1. Create the Terraform state bucket (one-time):  make tf-init-bucket"
+echo "    2. Push to main — CI will build the image and deploy automatically."
+echo "    3. Or deploy locally:  make tf-init && make tf-plan && make tf-deploy"
 echo ""

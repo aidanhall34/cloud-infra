@@ -1,0 +1,12 @@
+name: Setup GitHub CLI
+description: >
+  Ensures the GitHub CLI (gh) is installed.
+  A no-op on GitHub-hosted runners where gh is pre-installed;
+  installs it on act/self-hosted runners that lack it.
+
+runs:
+  using: composite
+  steps:
+    - name: Install GitHub CLI
+      shell: bash
+      run: which gh || (sudo apt-get update -qq && sudo apt-get install -y gh)
