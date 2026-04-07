@@ -8,7 +8,7 @@ inputs:
     description: "Status state: success, failure, error, or pending"
     required: true
   context:
-    description: "Status context label (e.g. molecule-gateway/gate)"
+    description: "Status context label (e.g. molecule/gate)"
     required: true
   description:
     description: "Short human-readable description of the status"
