@@ -15,47 +15,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  dispatch:
     runs-on: ubuntu-latest
-    environment: build
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup GitHub CLI
-        uses: ./.github/actions/setup-gh
-
-      - name: Record start time
-        id: start
-        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Generate homelab-deploy app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
         with:
-          python-version: "3.13"
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: homelab-deploy
 
-      - name: Install Python venvs
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
-
-      - name: Setup Packer
-        uses: hashicorp/setup-packer@v3
-
-      - name: Packer init
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} packer-init
-
-      - name: Build gateway image
+      - name: Dispatch packer-build to homelab-deploy
         env:
-          LINODE_CLI_TOKEN: ${{ secrets.LINODE_TOKEN }}
-          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} packer-build-gateway
-
-      - name: Notify Discord
-        if: always()
-        uses: ./.github/actions/notify-discord
-        with:
-          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          status: ${{ job.status }}
-          title: "packer-build — ${{ github.ref_name }}"
-          job-start-time: ${{ steps.start.outputs.ts }}
-          run-id: ${{ github.run_id }}
-          run-number: ${{ github.run_number }}
-          repo: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/aidanhall34/homelab-deploy/dispatches \
+            --method POST \
+            -f event_type="packer-build" \
+            -F client_payload[sha]="${{ github.sha }}" \
+            -F client_payload[ref]="${{ github.ref }}" \
+            -F client_payload[branch]="${{ github.ref_name }}"

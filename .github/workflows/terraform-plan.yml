@@ -1,75 +1,29 @@
 name: terraform-plan
 
 on:
-  # Only triggered after a successful packer-build run — ensures the latest image
-  # is available before planning, and prevents concurrent plan + apply runs.
-  workflow_run:
-    workflows:
-      - packer-build
-    types:
-      - completed
-  # Manual trigger for terraform-only changes (no ansible/packer changes to drive packer-build).
+  # Manual trigger for terraform-only changes (no ansible/packer changes).
+  # The automatic packer → terraform chain runs entirely within homelab-deploy.
   workflow_dispatch:
 
-# Cancel in-progress plans for the same commit when a newer event arrives.
-concurrency:
-  group: tf-plan-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-  cancel-in-progress: true
-
 jobs:
-  plan:
+  dispatch:
     runs-on: ubuntu-latest
-    environment: build
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     steps:
-      - uses: actions/checkout@v4
+      - name: Generate homelab-deploy app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: homelab-deploy
 
-      - name: Setup GitHub CLI
-        uses: ./.github/actions/setup-gh
-
-      - name: Record start time
-        id: start
-        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install Python venvs
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
-
-      - name: Terraform init
+      - name: Dispatch terraform-plan to homelab-deploy
         env:
-          LINODE_CLI_TOKEN:            ${{ secrets.LINODE_TOKEN }}
-          TF_VAR_ssh_public_key:       ${{ secrets.TF_SSH_PUBLIC_KEY }}
-          TF_VAR_allowed_ip_range:     ${{ secrets.TF_ALLOWED_IP_RANGE }}
-          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-init
-
-      - name: Terraform plan
-        env:
-          LINODE_CLI_TOKEN:            ${{ secrets.LINODE_TOKEN }}
-          TF_VAR_ssh_public_key:       ${{ secrets.TF_SSH_PUBLIC_KEY }}
-          TF_VAR_allowed_ip_range:     ${{ secrets.TF_ALLOWED_IP_RANGE }}
-          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-plan
-
-      - name: Notify Discord
-        if: always()
-        uses: ./.github/actions/notify-discord
-        with:
-          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          status: ${{ job.status }}
-          title: "terraform-plan — ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}"
-          job-start-time: ${{ steps.start.outputs.ts }}
-          run-id: ${{ github.run_id }}
-          run-number: ${{ github.run_number }}
-          repo: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/aidanhall34/homelab-deploy/dispatches \
+            --method POST \
+            -f event_type="terraform-plan" \
+            -F client_payload[sha]="${{ github.sha }}" \
+            -F client_payload[ref]="${{ github.ref }}" \
+            -F client_payload[branch]="${{ github.ref_name }}"

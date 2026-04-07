@@ -59,3 +59,5 @@
 # CI conventions
 
 - Github actions are used for CI
+- Deployment receiver actions can be found in the `./homelab-deploy` subdirectory
+- All credentials, excluding DISCORD_WEBHOOK_URL should be published to the [`homelab-deploy repo`](https://github.com/aidanhall34/homelab-deploy)

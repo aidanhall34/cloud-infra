@@ -1,7 +1,10 @@
 name: Post Commit Status
 description: >
-  Posts a commit status to the GitHub Statuses API for the current SHA.
-  Requires the workflow to have `statuses: write` permission.
+  Posts a commit status to the GitHub Statuses API.
+  Defaults to the current repo and SHA; pass token, repository, and sha
+  to post against a different repository (e.g. from a private deploy repo).
+  The calling workflow must have statuses:write permission, or the supplied
+  token must have repo:status scope on the target repository.
 
 inputs:
   state:
@@ -16,6 +19,18 @@ inputs:
   target-url:
     description: "URL to link from the status check"
     required: true
+  token:
+    description: "GitHub token. Defaults to github.token"
+    required: false
+    default: ""
+  repository:
+    description: "Target repository slug (owner/repo). Defaults to github.repository"
+    required: false
+    default: ""
+  sha:
+    description: "Commit SHA to post status against. Defaults to github.sha"
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -23,9 +38,11 @@ runs:
     - name: Post commit status
       shell: bash
       env:
-        GH_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ inputs.token || github.token }}
       run: |
-        gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+        repo="${{ inputs.repository || github.repository }}"
+        sha="${{ inputs.sha || github.sha }}"
+        gh api "repos/${repo}/statuses/${sha}" \
           --method POST \
           -f state="${{ inputs.state }}" \
           -f context="${{ inputs.context }}" \
