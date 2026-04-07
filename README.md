@@ -40,100 +40,101 @@ After installing the tools above, run `make setup` to create the Python virtual 
 
 | Target | Description | Source |
 |---|---|---|
-| `make tf-init` | Initialise Terraform with the local secrets/backend.hcl | [Makefile:58](Makefile#L58) |
-| `make tf-plan` | Run terraform plan (writes plan to /tmp/tfplan.binary) | [Makefile:63](Makefile#L63) |
-| `make tf-apply` | Apply the last plan produced by `make plan` | [Makefile:68](Makefile#L68) |
-| `make tf-destroy` | Destroy all managed infrastructure (prompts for confirmation) | [Makefile:73](Makefile#L73) |
-| `make tf-fmt` | Run terraform fmt recursively | [Makefile:78](Makefile#L78) |
-| `make tf-lint` | Check Terraform formatting without modifying files (no provider init required) | [Makefile:83](Makefile#L83) |
-| `make tf-validate` | Run terraform validate (requires terraform init first) | [Makefile:88](Makefile#L88) |
+| `make tf-init` | Initialise Terraform — generates a temporary Linode token and OBJ key automatically | [Makefile:126](Makefile#L126) |
+| `make tf-init-bucket` | Create the Linode Object Storage bucket for Terraform state (idempotent — skips if bucket already exists) | [Makefile:133](Makefile#L133) |
+| `make tf-plan` | Run terraform plan — generates a temporary Linode token and OBJ key automatically | [Makefile:143](Makefile#L143) |
+| `make tf-deploy` | Deploy gateway — generates a temporary Linode token and OBJ key automatically | [Makefile:151](Makefile#L151) |
+| `make tf-debug-bucket` | Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls | [Makefile:160](Makefile#L160) |
+| `make tf-destroy` | Destroy all managed infrastructure (prompts for confirmation) | [Makefile:185](Makefile#L185) |
+| `make tf-fmt` | Run terraform fmt recursively | [Makefile:190](Makefile#L190) |
+| `make tf-lint` | Check Terraform formatting without modifying files (no provider init required) | [Makefile:195](Makefile#L195) |
+| `make tf-validate` | Run terraform validate (requires terraform init first) | [Makefile:200](Makefile#L200) |
 
 ### CI — local act runs
 
 | Target | Description | Source |
 |---|---|---|
-| `make ci-pre-commit` | Run the pre-commit workflow locally via act | [Makefile:97](Makefile#L97) |
-| `make ci-unit-tests` | Run the unit-tests workflow locally via act | [Makefile:103](Makefile#L103) |
-| `make ci-molecule-gateway` | Run the molecule-gateway workflow locally via act | [Makefile:109](Makefile#L109) |
-| `make ci-packer-build` | Run the packer-build workflow locally via act (requires LINODE_TOKEN) | [Makefile:115](Makefile#L115) |
-| `make ci-mikrotik` | Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MIKROTIK_USERNAME, MIKROTIK_PASSWORD, MIKROTIK_WG_GATEWAY_ENDPOINT) | [Makefile:122](Makefile#L122) |
-| `make ci-terraform-apply` | Manually run terraform-apply via act (requires LINODE_TOKEN, TF_STATE_*, TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE, GATEWAY_IMAGE) | [Makefile:134](Makefile#L134) |
+| `make ci-pre-commit` | Run the pre-commit workflow locally via act | [Makefile:209](Makefile#L209) |
+| `make ci-unit-tests` | Run the unit-tests workflow locally via act | [Makefile:216](Makefile#L216) |
+| `make ci-molecule-gateway` | Run the molecule-gateway workflow locally via act | [Makefile:223](Makefile#L223) |
+| `make ci-packer-build` | Run the packer-build workflow locally via act | [Makefile:230](Makefile#L230) |
+| `make ci-mikrotik` | Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MIKROTIK_USERNAME, MIKROTIK_PASSWORD, MIKROTIK_WG_GATEWAY_ENDPOINT) | [Makefile:237](Makefile#L237) |
+| `make ci-terraform-plan` | Run the terraform-plan PR check locally via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE) | [Makefile:250](Makefile#L250) |
+| `make ci-terraform-apply` | Manually run terraform-apply via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE) | [Makefile:259](Makefile#L259) |
 
 ### Secrets and credentials
 
 | Target | Description | Source |
 |---|---|---|
-| `make generate-wireguard-keys` | Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg) | [Makefile:151](Makefile#L151) |
-| `make upload-secrets` | Upload all secrets from secrets/ to GitHub Actions | [Makefile:174](Makefile#L174) |
-| `make setup-oauth` | Create the GitHub OAuth App for Grafana SSO (writes to secrets/) | [Makefile:179](Makefile#L179) |
-| `make generate-grafana-key` | Generate a new Grafana session signing key (secrets/grafana_secret_key) | [Makefile:184](Makefile#L184) |
+| `make generate-wireguard-keys` | Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg) | [Makefile:275](Makefile#L275) |
+| `make upload-secrets` | Upload all secrets from secrets/ to GitHub Actions | [Makefile:298](Makefile#L298) |
+| `make setup-oauth` | Create the GitHub OAuth App for Grafana SSO (writes to secrets/) | [Makefile:303](Makefile#L303) |
+| `make generate-grafana-key` | Generate a new Grafana session signing key (secrets/grafana_secret_key) | [Makefile:308](Makefile#L308) |
 
 ### Setup
 
 | Target | Description | Source |
 |---|---|---|
-| `make setup` | Install all Python dependencies (ansible/ and scripts/ virtual environments) | [Makefile:198](Makefile#L198) |
+| `make setup` | Install all Python dependencies (ansible/ and scripts/ virtual environments) | [Makefile:322](Makefile#L322) |
 
 ### Linting
 
 | Target | Description | Source |
 |---|---|---|
-| `make lint` | Run all linters and validators (tf-validate excluded: requires terraform init) | [Makefile:206](Makefile#L206) |
-| `make lint-python` | Lint all Python code with ruff (scripts/ and ansible/) | [Makefile:209](Makefile#L209) |
+| `make lint` | Run all linters and validators (tf-validate excluded: requires terraform init) | [Makefile:330](Makefile#L330) |
+| `make lint-python` | Lint all Python code with ruff (scripts/ and ansible/) | [Makefile:333](Makefile#L333) |
 
 ### Ansible
 
 | Target | Description | Source |
 |---|---|---|
-| `make ansible-lint` | Lint Ansible roles and modules with ansible-lint | [Makefile:217](Makefile#L217) |
-| `make ansible-molecule` | Run molecule integration tests for all roles (Docker, systemd-compatible containers) | [Makefile:222](Makefile#L222) |
-| `make ansible-molecule-gateway` | Run molecule integration tests for the gateway role | [Makefile:229](Makefile#L229) |
-| `make ansible-molecule-common` | Run molecule integration tests for the common role | [Makefile:234](Makefile#L234) |
-| `make ansible-pytest` | Run pytest unit tests for custom Ansible modules | [Makefile:239](Makefile#L239) |
-| `make ansible-doc` | Generate documentation for all custom Ansible modules into docs/ansible-modules/ | [Makefile:244](Makefile#L244) |
+| `make ansible-lint` | Lint Ansible roles and modules with ansible-lint | [Makefile:341](Makefile#L341) |
+| `make ansible-molecule` | Run molecule integration tests for all roles (Docker, systemd-compatible containers) | [Makefile:346](Makefile#L346) |
+| `make ansible-molecule-gateway` | Run molecule integration tests for the gateway role | [Makefile:353](Makefile#L353) |
+| `make ansible-molecule-common` | Run molecule integration tests for the common role | [Makefile:358](Makefile#L358) |
+| `make ansible-pytest` | Run pytest unit tests for custom Ansible modules | [Makefile:363](Makefile#L363) |
+| `make ansible-doc` | Generate documentation for all custom Ansible modules into docs/ansible-modules/ | [Makefile:368](Makefile#L368) |
 
 ### Linode — credentials
 
 | Target | Description | Source |
 |---|---|---|
-| `make linode-login` | Authenticate the Linode CLI via browser (writes to ~/.config/linode-cli) | [Makefile:260](Makefile#L260) |
-| `make linode-packer-token` | Create a Linode packer API token expiring in 24 hours (linodes + images read/write, event read_only) - DO NOT LOG | [Makefile:264](Makefile#L264) |
-| `make linode-deploy-token` | Create a Linode API token for Terraform deployments (linodes + firewall read/write) - DO NOT LOG | [Makefile:274](Makefile#L274) |
+| `make linode-login` | Authenticate the Linode CLI via browser (writes to ~/.config/linode-cli) | [Makefile:384](Makefile#L384) |
 
 ### Packer — image builds
 
 | Target | Description | Source |
 |---|---|---|
-| `make packer-init` | Initialise Packer plugins for all builds (run once after checkout) | [Makefile:286](Makefile#L286) |
-| `make packer-build-gateway` | Build the Alpine gateway image (WireGuard, Blocky, Nginx) and upload it to Linode | [Makefile:291](Makefile#L291) |
-| `make packer-validate` | Validate all Packer configurations without building | [Makefile:297](Makefile#L297) |
-| `make packer-fmt` | Format Packer configuration (all builds) | [Makefile:303](Makefile#L303) |
+| `make packer-init` | Initialise Packer plugins for all builds (run once after checkout) | [Makefile:390](Makefile#L390) |
+| `make packer-build-gateway` | Build the Alpine gateway image — generates a temporary Linode token automatically | [Makefile:395](Makefile#L395) |
+| `make packer-validate` | Validate all Packer configurations without building | [Makefile:402](Makefile#L402) |
+| `make packer-fmt` | Format Packer configuration (all builds) | [Makefile:408](Makefile#L408) |
 
 ### Development
 
 | Target | Description | Source |
 |---|---|---|
-| `make dev-volumes` | Create persistent telemetry volumes (idempotent — safe to run on an existing setup) | [Makefile:310](Makefile#L310) |
-| `make dev-secrets` | Generate dev Grafana admin + renderer credentials (secrets/dev-grafana.env) — skips if already present | [Makefile:316](Makefile#L316) |
-| `make dev-backup-secrets` | Generate secrets/dev-backup.env with a random GPG passphrase and S3 credential placeholders | [Makefile:330](Makefile#L330) |
-| `make dev-backup` | Trigger an ad-hoc backup of all dev volumes to S3 (Prometheus TSDB snapshot taken first via exec-pre hook) | [Makefile:361](Makefile#L361) |
-| `make dev-restore` | Restore dev volumes from S3 (latest backup). Pass FILE=<name> to restore a specific backup. | [Makefile:365](Makefile#L365) |
-| `make otelcol-validate` | Validate otelcol configs against otelcol-contrib $(OTELCOL_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:369](Makefile#L369) |
-| `make blocky-validate` | Validate blocky config with blocky v$(BLOCKY_VERSION) | [Makefile:380](Makefile#L380) |
-| `make prometheus-validate` | Validate prometheus config with promtool $(PROMETHEUS_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:388](Makefile#L388) |
-| `make dev-up` | Start the local LGTM development stack (Grafana on :3000, anonymous admin) | [Makefile:398](Makefile#L398) |
-| `make dev-down` | Stop and remove the local LGTM development stack | [Makefile:403](Makefile#L403) |
-| `make dev-logs` | Tail logs from all development stack services | [Makefile:408](Makefile#L408) |
+| `make dev-volumes` | Create persistent telemetry volumes (idempotent — safe to run on an existing setup) | [Makefile:415](Makefile#L415) |
+| `make dev-secrets` | Generate dev Grafana admin + renderer credentials (secrets/dev-grafana.env) — skips if already present | [Makefile:421](Makefile#L421) |
+| `make dev-backup-secrets` | Generate secrets/dev-backup.env with a random GPG passphrase and S3 credential placeholders | [Makefile:435](Makefile#L435) |
+| `make dev-backup` | Trigger an ad-hoc backup of all dev volumes to S3 (Prometheus TSDB snapshot taken first via exec-pre hook) | [Makefile:466](Makefile#L466) |
+| `make dev-restore` | Restore dev volumes from S3 (latest backup). Pass FILE=<name> to restore a specific backup. | [Makefile:470](Makefile#L470) |
+| `make otelcol-validate` | Validate otelcol configs against otelcol-contrib $(OTELCOL_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:474](Makefile#L474) |
+| `make blocky-validate` | Validate blocky config with blocky v$(BLOCKY_VERSION) | [Makefile:485](Makefile#L485) |
+| `make prometheus-validate` | Validate prometheus config with promtool $(PROMETHEUS_VERSION) (bundled in grafana/otel-lgtm) | [Makefile:493](Makefile#L493) |
+| `make dev-up` | Start the local LGTM development stack (Grafana on :3000, anonymous admin) | [Makefile:503](Makefile#L503) |
+| `make dev-down` | Stop and remove the local LGTM development stack | [Makefile:508](Makefile#L508) |
+| `make dev-logs` | Tail logs from all development stack services | [Makefile:513](Makefile#L513) |
 
 ### Scripts container
 
 | Target | Description | Source |
 |---|---|---|
-| `make build` | Build the scripts container image (aidanhall34/homelab:latest) | [Makefile:414](Makefile#L414) |
+| `make build` | Build the scripts container image (aidanhall34/homelab:latest) | [Makefile:521](Makefile#L521) |
 
 ### Documentation
 
 | Target | Description | Source |
 |---|---|---|
-| `make readme` | Regenerate README.md from README.md.tpl and Makefile comments | [Makefile:424](Makefile#L424) |
+| `make readme` | Regenerate README.md from README.md.tpl and Makefile comments | [Makefile:531](Makefile#L531) |
 

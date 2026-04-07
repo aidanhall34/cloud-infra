@@ -51,7 +51,8 @@ GITHUB_TOKEN         ?= $(shell gh auth token)
 DISCORD_WEBHOOK_URL  ?= $(shell cat $(SECRETS_DIR)/discord_webhook_url 2>/dev/null)
 ACT_FLAGS            := --platform ubuntu-latest=catthehacker/ubuntu:act-latest \
                         --container-options "--add-host=host.docker.internal:host-gateway" \
-                        --env OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318 \
+                        --env OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317 \
+                        --env OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
                         --env OTEL_TRACES_EXPORTER=otlp \
                         --env OTEL_METRICS_EXPORTER=otlp \
                         --secret GITHUB_TOKEN="$(GITHUB_TOKEN)" \
@@ -69,13 +70,14 @@ _act_token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
     --json); \
 _act_token_id=$$(echo "$$_act_token_json" | jq -r '.[0].id'); \
 export LINODE_TOKEN=$$(echo "$$_act_token_json" | jq -r '.[0].token'); \
-trap "echo 'Revoking act Linode token $$_act_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run linode-cli profile token-delete $$_act_token_id" EXIT;
+trap "echo 'Revoking act Linode token $$_act_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$LINODE_TOKEN\" uv run linode-cli profile token-delete $$_act_token_id" EXIT;
 endef
 
 # Creates a temporary scoped Linode API token, exports it as LINODE_CLI_TOKEN and
 # the named variable, then traps deletion on exit.
 # Usage: $(call linode-api-token,<label-prefix>,<scopes>,<export-var>)
 define linode-api-token
+_parent_token="$$LINODE_CLI_TOKEN"; \
 _token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
     --label "$(1)-$$(date +%s)" \
     --expiry "$$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%S')" \
@@ -84,7 +86,7 @@ _token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
 _token_id=$$(echo "$$_token_json" | jq -r '.[0].id'); \
 export LINODE_CLI_TOKEN=$$(echo "$$_token_json" | jq -r '.[0].token'); \
 export $(3)="$$LINODE_CLI_TOKEN"; \
-trap "echo 'Revoking Linode token $$_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run linode-cli profile token-delete $$_token_id" EXIT;
+trap "echo 'Revoking Linode token $$_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$_parent_token\" uv run linode-cli profile token-delete $$_token_id" EXIT;
 endef
 
 # Creates a temporary scoped Linode OBJ key and registers a trap to delete it on
@@ -209,35 +211,35 @@ tf-validate: ## Run terraform validate (requires terraform init first)
 ci-pre-commit: ## Run the pre-commit workflow locally via act
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act push --json $(ACT_FLAGS) \
+	  act push --json --eventpath .github/act/pre-commit.json $(ACT_FLAGS) \
 	  --workflows .github/workflows/pre-commit.yml; } $(L)
 
 .PHONY: ci-unit-tests
 ci-unit-tests: ## Run the unit-tests workflow locally via act
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act push --json $(ACT_FLAGS) \
+	  act push --json --eventpath .github/act/unit-tests.json $(ACT_FLAGS) \
 	  --workflows .github/workflows/unit-tests.yml; } $(L)
 
 .PHONY: ci-molecule-gateway
 ci-molecule-gateway: ## Run the molecule-gateway workflow locally via act
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act workflow_dispatch --json $(ACT_FLAGS) \
+	  act workflow_dispatch --json --eventpath .github/act/molecule-gateway.json $(ACT_FLAGS) \
 	  --workflows .github/workflows/molecule-gateway.yml; } $(L)
 
 .PHONY: ci-packer-build
-ci-packer-build: ## Run the packer-build workflow locally via act
+ci-packer-build: ## Run the packer-build workflow locally via act (simulates push to main)
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act push --json $(ACT_FLAGS) \
+	  act push --json --eventpath .github/act/packer-build.json $(ACT_FLAGS) \
 	  --workflows .github/workflows/packer-build.yml; } $(L)
 
 .PHONY: ci-mikrotik
 ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MIKROTIK_USERNAME, MIKROTIK_PASSWORD, MIKROTIK_WG_GATEWAY_ENDPOINT)
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act workflow_dispatch --json $(ACT_FLAGS) \
+	  act workflow_dispatch --json --eventpath .github/act/molecule-gateway.json $(ACT_FLAGS) \
 	  --secret MIKROTIK_HOST="$(MIKROTIK_HOST)" \
 	  --secret MIKROTIK_USERNAME="$(MIKROTIK_USERNAME)" \
 	  --secret MIKROTIK_PASSWORD="$(MIKROTIK_PASSWORD)" \
@@ -247,24 +249,19 @@ ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MI
 	  --workflows .github/workflows/mikrotik.yml; } $(L)
 
 .PHONY: ci-terraform-plan
-ci-terraform-plan: ## Run the terraform-plan PR check locally via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE)
+ci-terraform-plan: ## Run the terraform-plan workflow locally via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE)
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act pull_request --json $(ACT_FLAGS) \
+	  act push --json --eventpath .github/act/terraform-plan.json $(ACT_FLAGS) \
 	  --secret TF_SSH_PUBLIC_KEY="$(TF_SSH_PUBLIC_KEY)" \
 	  --secret TF_ALLOWED_IP_RANGE="$(TF_ALLOWED_IP_RANGE)" \
 	  --workflows .github/workflows/terraform-plan.yml; } $(L)
 
 .PHONY: ci-terraform-apply
-ci-terraform-apply: ## Manually run terraform-apply via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE)
+ci-terraform-apply: ## Manually run terraform-apply via act (simulates workflow_dispatch from main — requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE)
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
-	  act workflow_dispatch --json $(ACT_FLAGS) \
-	  --secret TF_STATE_BUCKET="$(TF_STATE_BUCKET)" \
-	  --secret TF_STATE_REGION="$(TF_STATE_REGION)" \
-	  --secret TF_STATE_ENDPOINT="$(TF_STATE_ENDPOINT)" \
-	  --secret TF_STATE_ACCESS_KEY="$(TF_STATE_ACCESS_KEY)" \
-	  --secret TF_STATE_SECRET_KEY="$(TF_STATE_SECRET_KEY)" \
+	  act workflow_dispatch --json --eventpath .github/act/terraform-apply.json $(ACT_FLAGS) \
 	  --secret TF_SSH_PUBLIC_KEY="$(TF_SSH_PUBLIC_KEY)" \
 	  --secret TF_ALLOWED_IP_RANGE="$(TF_ALLOWED_IP_RANGE)" \
 	  --workflows .github/workflows/terraform-apply.yml; } $(L)
@@ -395,8 +392,9 @@ packer-init: ## Initialise Packer plugins for all builds (run once after checkou
 packer-build-gateway: ## Build the Alpine gateway image — generates a temporary Linode token automatically
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-api-token,packer-build,linodes:read_write images:read_write events:read_only,PKR_VAR_linode_token) \
+	  git_sha=$$(git rev-parse --short HEAD); \
 	  flag=$$([ -f packer/gateway/vars.pkrvars.hcl ] && echo "-var-file=vars.pkrvars.hcl"); \
-	  cd packer/gateway && packer build $$flag .; } $(L)
+	  cd packer/gateway && PKR_VAR_git_sha=$$git_sha packer build $$flag .; } $(L)
 
 .PHONY: packer-validate
 packer-validate: packer-init ## Validate all Packer configurations without building

@@ -1,24 +1,44 @@
 name: terraform-plan
 
 on:
-  pull_request:
-    branches:
-      - main
+  # Automatically triggered after a successful packer-build run on any branch.
+  workflow_run:
+    workflows:
+      - packer-build
+    types:
+      - completed
+  # Also triggered directly on pushes that touch only terraform (no packer/ansible changes).
+  push:
     paths:
       - "terraform/**"
-      - "ansible/**"
-      - "packer/**"
       - ".github/workflows/terraform-plan.yml"
+
+# Cancel in-progress plans for the same commit when a newer event arrives.
+concurrency:
+  group: tf-plan-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   plan:
     runs-on: ubuntu-latest
+    environment: build
+    # For workflow_run: only proceed if the triggering build succeeded.
+    # For push: always proceed.
+    if: |
+      github.event_name == 'push' ||
+      github.event.workflow_run.conclusion == 'success'
     steps:
+      # Check out the exact commit that triggered this run (or HEAD for direct pushes).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Record start time
         id: start
         run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -28,15 +48,20 @@ jobs:
       - name: Install Python venvs
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Terraform init
+        env:
+          LINODE_CLI_TOKEN:            ${{ secrets.LINODE_TOKEN }}
+          TF_VAR_ssh_public_key:       ${{ secrets.TF_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ip_range:     ${{ secrets.TF_ALLOWED_IP_RANGE }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-init
 
       - name: Terraform plan
         env:
-          LINODE_CLI_TOKEN:              ${{ secrets.LINODE_TOKEN }}
-          TF_VAR_ssh_public_key:         ${{ secrets.TF_SSH_PUBLIC_KEY }}
-          TF_VAR_allowed_ip_range:       ${{ secrets.TF_ALLOWED_IP_RANGE }}
-          OTEL_EXPORTER_OTLP_ENDPOINT:   ${{ secrets.OTEL_ENDPOINT }}
+          LINODE_CLI_TOKEN:            ${{ secrets.LINODE_TOKEN }}
+          TF_VAR_ssh_public_key:       ${{ secrets.TF_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ip_range:     ${{ secrets.TF_ALLOWED_IP_RANGE }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-plan
 
       - name: Notify Discord
@@ -45,7 +70,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           status: ${{ job.status }}
-          title: "terraform-plan — ${{ github.head_ref }}"
+          title: "terraform-plan — ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}"
           job-start-time: ${{ steps.start.outputs.ts }}
           run-id: ${{ github.run_id }}
           run-number: ${{ github.run_number }}

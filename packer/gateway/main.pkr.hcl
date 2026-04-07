@@ -39,10 +39,16 @@ variable "alpine_version" {
   default     = "3.22"
 }
 
+variable "git_sha" {
+  description = "Short git commit SHA baked into the image label for traceability (e.g. abc1234)"
+  type        = string
+  default     = "dev"
+}
+
 # ── Locals ────────────────────────────────────────────────────────────────────
 
 locals {
-  image_label = "alpine-gateway-${var.alpine_version}"
+  image_label = "alpine-gateway-${var.alpine_version}-${var.git_sha}"
 }
 
 # ── Linode builder ────────────────────────────────────────────────────────────

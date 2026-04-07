@@ -1,0 +1,10 @@
+{
+  "ref": "refs/heads/feat/act",
+  "commits": [
+    {
+      "id": "act",
+      "message": "act: local test run",
+      "modified": ["terraform/compute.tf"]
+    }
+  ]
+}

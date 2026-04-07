@@ -4,6 +4,9 @@ on:
   push:
     branches-ignore:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   lint:
@@ -26,7 +29,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python venvs
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
+        run: make setup
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -35,12 +38,12 @@ jobs:
         uses: hashicorp/setup-packer@v3
 
       - name: Packer init
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} packer-init
+        run: make packer-init
 
       - name: Run linters
         env:
           PKR_VAR_linode_token: ci
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} lint
+        run: make lint
 
       - name: Notify Discord
         if: always()
