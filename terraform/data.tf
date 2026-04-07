@@ -4,9 +4,9 @@ data "linode_images" "gateway" {
   latest = true
 
   filter {
-    name      = "label"
-    values    = ["alpine-gateway-"]
-    match_by  = "substring"
+    name     = "label"
+    values   = ["alpine-gateway-"]
+    match_by = "substring"
   }
 
   filter {
