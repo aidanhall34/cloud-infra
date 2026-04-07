@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup GitHub CLI
+        uses: ./.github/actions/setup-gh
+
       - name: Record start time
         id: start
         run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
