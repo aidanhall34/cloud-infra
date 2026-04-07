@@ -159,7 +159,7 @@ tf-deploy: ## Deploy gateway — generates a temporary Linode token and OBJ key 
 	    $(OTEL_ENV) terraform apply -json /tmp/tfplan.binary; } $(L)
 
 .PHONY: tf-debug-bucket
-tf-debug-bucket: ## Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls
+tf-debug-bucket: ## Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls - DO NOT LOG
 	@mkdir -p $(LOG_DIR)
 	@{ $(call tf-obj-key,tf-debug) \
 	  echo "--- Credentials ---"; \
@@ -181,7 +181,7 @@ tf-debug-bucket: ## Debug: create a temp OBJ key and list the Terraform state bu
 	  echo "--- Cleanup ---"; \
 	  aws s3 rm s3://$(TF_STATE_BUCKET)/.debug-write-test \
 	    --endpoint-url https://$(TF_STATE_ENDPOINT) \
-	    --region $(TF_STATE_CLUSTER) || true; } $(L)
+	    --region $(TF_STATE_CLUSTER) || true; }
 
 .PHONY: tf-destroy
 tf-destroy: ## Destroy all managed infrastructure (prompts for confirmation)
