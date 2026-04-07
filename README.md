@@ -56,7 +56,7 @@ After installing the tools above, run `make setup` to create the Python virtual 
 |---|---|---|
 | `make ci-pre-commit` | Run the pre-commit workflow locally via act | [Makefile:214](Makefile#L214) |
 | `make ci-unit-tests` | Run the unit-tests workflow locally via act | [Makefile:221](Makefile#L221) |
-| `make ci-molecule-gateway` | Run the molecule-gateway workflow locally via act | [Makefile:228](Makefile#L228) |
+| `make ci-molecule` | Run the molecule workflow locally via act | [Makefile:228](Makefile#L228) |
 | `make ci-packer-build` | Run the packer-build workflow locally via act (simulates push to main) | [Makefile:235](Makefile#L235) |
 | `make ci-mikrotik` | Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MIKROTIK_USERNAME, MIKROTIK_PASSWORD, MIKROTIK_WG_GATEWAY_ENDPOINT) | [Makefile:242](Makefile#L242) |
 | `make ci-terraform-plan` | Run the terraform-plan workflow locally via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE) | [Makefile:255](Makefile#L255) |

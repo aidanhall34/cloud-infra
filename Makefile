@@ -224,12 +224,12 @@ ci-unit-tests: ## Run the unit-tests workflow locally via act
 	  act push --json --eventpath .github/act/unit-tests.json $(ACT_FLAGS) \
 	  --workflows .github/workflows/unit-tests.yml; } $(L)
 
-.PHONY: ci-molecule-gateway
-ci-molecule-gateway: ## Run the molecule-gateway workflow locally via act
+.PHONY: ci-molecule
+ci-molecule: ## Run the molecule workflow locally via act
 	@mkdir -p $(LOG_DIR)
 	@{ $(call linode-act-token) \
 	  act workflow_dispatch --json --eventpath .github/act/molecule-gateway.json $(ACT_FLAGS) \
-	  --workflows .github/workflows/molecule-gateway.yml; } $(L)
+	  --workflows .github/workflows/molecule.yml; } $(L)
 
 .PHONY: ci-packer-build
 ci-packer-build: ## Run the packer-build workflow locally via act (simulates push to main)
