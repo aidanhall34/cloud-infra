@@ -1,6 +1,6 @@
 ---
 # Ansible Galaxy collection requirements.
-# Install with: cd ansible && uv run ansible-galaxy collection install -r requirements.yml -p .collections
+# Install with: cd ansible && uv run --active ansible-galaxy collection install -r requirements.yml -p .collections
 
 collections:
   - name: community.general
