@@ -3,23 +3,23 @@
 # mikrotik_host     — required, no default (router IP/hostname)
 # mikrotik_password — required secret, no default
 
-mikrotik_username:         admin
-mikrotik_api_tls:          true
-mikrotik_api_validate_certs: false   # MikroTik commonly issues self-signed certs
+mikrotik_username: admin
+mikrotik_api_tls: true
+mikrotik_api_validate_certs: false # MikroTik commonly issues self-signed certs
 
 # ── WireGuard interface ───────────────────────────────────────────────────────
 # mikrotik_wg_private_key      — required secret, no default (generate with: make generate-wireguard-keys)
 # mikrotik_wg_gateway_public_key — required secret, no default (from secrets/wireguard_gateway_public.key)
 # mikrotik_wg_gateway_endpoint — required, no default (gateway public IP — fails if undefined)
 
-mikrotik_wg_interface:    wg-gateway
-mikrotik_wg_listen_port:  51820
-mikrotik_wg_mtu:          1420
+mikrotik_wg_interface: wg-gateway
+mikrotik_wg_listen_port: 51820
+mikrotik_wg_mtu: 1420
 
 # IP address assigned to the WireGuard tunnel interface on the MikroTik side.
 mikrotik_wg_address: "10.0.0.2/24"
 
 # ── Gateway peer ──────────────────────────────────────────────────────────────
-mikrotik_wg_gateway_port:            51820
+mikrotik_wg_gateway_port: 51820
 mikrotik_wg_gateway_allowed_address: "10.0.0.1/32"
-mikrotik_wg_keepalive:               25
+mikrotik_wg_keepalive: 25

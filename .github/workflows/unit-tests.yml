@@ -21,10 +21,10 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python venvs
-        run: make setup
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
       - name: Run unit tests
-        run: make ansible-pytest
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} ansible-pytest
 
       - name: Notify Discord
         if: always()

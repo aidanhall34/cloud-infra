@@ -1,6 +1,6 @@
 name: mikrotik
 
-# Local-only workflow — run via `make ci-mikrotik`, not triggered by GitHub.
+# Local-only workflow — run via `make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} ci-mikrotik`, not triggered by GitHub.
 # Secrets are passed directly by the Makefile act invocation.
 
 on:
@@ -22,19 +22,19 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python venvs
-        run: make setup
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
       - name: Install Ansible collections
         run: cd ansible && uv run ansible-galaxy collection install -r requirements.yml -p .collections
 
       - name: Configure MikroTik WireGuard
         env:
-          MIKROTIK_HOST:                    ${{ secrets.MIKROTIK_HOST }}
-          MIKROTIK_USERNAME:                ${{ secrets.MIKROTIK_USERNAME }}
-          MIKROTIK_PASSWORD:                ${{ secrets.MIKROTIK_PASSWORD }}
-          MIKROTIK_WG_PRIVATE_KEY:          ${{ secrets.MIKROTIK_WG_PRIVATE_KEY }}
-          MIKROTIK_WG_GATEWAY_PUBLIC_KEY:   ${{ secrets.MIKROTIK_WG_GATEWAY_PUBLIC_KEY }}
-          MIKROTIK_WG_GATEWAY_ENDPOINT:     ${{ secrets.MIKROTIK_WG_GATEWAY_ENDPOINT }}
+          MIKROTIK_HOST: ${{ secrets.MIKROTIK_HOST }}
+          MIKROTIK_USERNAME: ${{ secrets.MIKROTIK_USERNAME }}
+          MIKROTIK_PASSWORD: ${{ secrets.MIKROTIK_PASSWORD }}
+          MIKROTIK_WG_PRIVATE_KEY: ${{ secrets.MIKROTIK_WG_PRIVATE_KEY }}
+          MIKROTIK_WG_GATEWAY_PUBLIC_KEY: ${{ secrets.MIKROTIK_WG_GATEWAY_PUBLIC_KEY }}
+          MIKROTIK_WG_GATEWAY_ENDPOINT: ${{ secrets.MIKROTIK_WG_GATEWAY_ENDPOINT }}
         run: |
           cd ansible && uv run ansible-playbook mikrotik.yml \
             -e mikrotik_host="$MIKROTIK_HOST" \

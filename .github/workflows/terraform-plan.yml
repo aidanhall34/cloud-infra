@@ -1,20 +1,20 @@
-name: pre-commit
+name: terraform-plan
 
 on:
-  push:
-    branches-ignore:
+  pull_request:
+    branches:
       - main
+    paths:
+      - "terraform/**"
+      - "ansible/**"
+      - "packer/**"
+      - ".github/workflows/terraform-plan.yml"
 
 jobs:
-  lint:
+  plan:
     runs-on: ubuntu-latest
-    env:
-      VIRTUAL_ENV: ""
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install GitHub CLI
-        run: which gh || (sudo apt-get update -qq && sudo apt-get install -y gh)
 
       - name: Record start time
         id: start
@@ -31,16 +31,13 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Setup Packer
-        uses: hashicorp/setup-packer@v3
-
-      - name: Packer init
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} packer-init
-
-      - name: Run linters
+      - name: Terraform plan
         env:
-          PKR_VAR_linode_token: ci
-        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} lint
+          LINODE_CLI_TOKEN:              ${{ secrets.LINODE_TOKEN }}
+          TF_VAR_ssh_public_key:         ${{ secrets.TF_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ip_range:       ${{ secrets.TF_ALLOWED_IP_RANGE }}
+          OTEL_EXPORTER_OTLP_ENDPOINT:   ${{ secrets.OTEL_ENDPOINT }}
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} tf-plan
 
       - name: Notify Discord
         if: always()
@@ -48,7 +45,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           status: ${{ job.status }}
-          title: "pre-commit — ${{ github.ref_name }}"
+          title: "terraform-plan — ${{ github.head_ref }}"
           job-start-time: ${{ steps.start.outputs.ts }}
           run-id: ${{ github.run_id }}
           run-number: ${{ github.run_number }}

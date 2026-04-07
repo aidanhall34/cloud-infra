@@ -12,10 +12,15 @@
 #
 # Usage: make <target>
 
-SHELL := /usr/bin/env bash
+SHELL         := /usr/bin/env bash
+.SHELLFLAGS   := -o pipefail -c
 .DEFAULT_GOAL := help
 
-TF_DIR      := terraform
+TF_DIR           := terraform
+TF_STATE_BUCKET          := homelab-tf
+TF_STATE_CLUSTER         := au-mel
+TF_STATE_ENDPOINT        := au-mel-1.linodeobjects.com
+TF_STATE_ENDPOINT_REGION := au-mel-1
 SECRETS_DIR := secrets
 SCRIPTS_DIR := scripts
 ANSIBLE_DIR := ansible
@@ -29,14 +34,73 @@ OTELCOL_VERSION    := 0.147.0   # bundled in grafana/otel-lgtm:$(LGTM_VERSION)
 PROMETHEUS_VERSION := 3.10.0    # bundled in grafana/otel-lgtm:$(LGTM_VERSION)
 BLOCKY_VERSION     := 0.29.0
 
+# OTEL endpoint for local tools. Override in the environment if needed.
+# Inside act containers this is overridden to host.docker.internal via ACT_FLAGS.
+# In GitHub Actions set OTEL_EXPORTER_OTLP_ENDPOINT as a secret/env var.
+OTEL_ENDPOINT ?= http://localhost:4318
+
+# Env vars prepended to Terraform commands to enable OTLP traces + metrics.
+OTEL_ENV := OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp \
+            OTEL_EXPORTER_OTLP_ENDPOINT=$(OTEL_ENDPOINT)
+
 # act: use the medium-sized runner image and inject the GitHub token via gh CLI.
 # GITHUB_TOKEN defaults to `gh auth token` — override in the environment if needed.
 # DISCORD_WEBHOOK_URL is read from secrets/discord_webhook_url — override in the environment if needed.
+# LINODE_TOKEN is generated at runtime by linode-act-token ($$LINODE_TOKEN shell var).
 GITHUB_TOKEN         ?= $(shell gh auth token)
 DISCORD_WEBHOOK_URL  ?= $(shell cat $(SECRETS_DIR)/discord_webhook_url 2>/dev/null)
 ACT_FLAGS            := --platform ubuntu-latest=catthehacker/ubuntu:act-latest \
+                        --container-options "--add-host=host.docker.internal:host-gateway" \
+                        --env OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318 \
+                        --env OTEL_TRACES_EXPORTER=otlp \
+                        --env OTEL_METRICS_EXPORTER=otlp \
                         --secret GITHUB_TOKEN="$(GITHUB_TOKEN)" \
-                        --secret DISCORD_WEBHOOK_URL="$(DISCORD_WEBHOOK_URL)"
+                        --secret DISCORD_WEBHOOK_URL="$(DISCORD_WEBHOOK_URL)" \
+                        --secret LINODE_TOKEN="$$LINODE_TOKEN"
+
+# Creates a full-permission temporary Linode token for act runners, exported as
+# LINODE_TOKEN (picked up by $$LINODE_TOKEN in ACT_FLAGS). Traps revocation on exit.
+# Usage: $(call linode-act-token)
+define linode-act-token
+_act_token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
+    --label "act-$$(date +%s)" \
+    --expiry "$$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%S')" \
+    --scopes "*" \
+    --json); \
+_act_token_id=$$(echo "$$_act_token_json" | jq -r '.[0].id'); \
+export LINODE_TOKEN=$$(echo "$$_act_token_json" | jq -r '.[0].token'); \
+trap "echo 'Revoking act Linode token $$_act_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run linode-cli profile token-delete $$_act_token_id" EXIT;
+endef
+
+# Creates a temporary scoped Linode API token, exports it as LINODE_CLI_TOKEN and
+# the named variable, then traps deletion on exit.
+# Usage: $(call linode-api-token,<label-prefix>,<scopes>,<export-var>)
+define linode-api-token
+_token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
+    --label "$(1)-$$(date +%s)" \
+    --expiry "$$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%S')" \
+    --scopes "$(2)" \
+    --json); \
+_token_id=$$(echo "$$_token_json" | jq -r '.[0].id'); \
+export LINODE_CLI_TOKEN=$$(echo "$$_token_json" | jq -r '.[0].token'); \
+export $(3)="$$LINODE_CLI_TOKEN"; \
+trap "echo 'Revoking Linode token $$_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run linode-cli profile token-delete $$_token_id" EXIT;
+endef
+
+# Creates a temporary scoped Linode OBJ key and registers a trap to delete it on
+# shell exit. Expands into a recipe as: $(call tf-obj-key,<label-prefix>)
+# Sets shell vars: key_id, access_key, secret_key.
+define tf-obj-key
+export key_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli object-storage keys-create \
+    --label "$(1)-$$(date +%s)" \
+    --json); \
+export key_id="$$(echo "$$key_json" | jq -r '.[0].id' )"; \
+export AWS_ACCESS_KEY_ID="$$(echo "$$key_json" | jq -r '.[0].access_key' )"; \
+export AWS_SECRET_ACCESS_KEY="$$(echo "$$key_json" | jq -r '.[0].secret_key' )"; \
+export AWS_REGION="$(TF_STATE_CLUSTER)"; \
+trap "[ -n \"$$key_id\" ] && { echo 'Deleting OBJ key $$key_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run linode-cli object-storage keys-delete $$key_id; }" EXIT; \
+echo "Waiting for OBJ key to propagate..."; sleep 10;
+endef
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 # Each recipe tees its combined stdout+stderr to dev/logs/<target>.log (append).
@@ -59,73 +123,121 @@ help: ## Show this help message
 ## Terraform — local
 
 .PHONY: tf-init
-tf-init: ## Initialise Terraform with the local secrets/backend.hcl
+tf-init: ## Initialise Terraform — generates a temporary Linode token and OBJ key automatically
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && terraform init -backend-config=../$(SECRETS_DIR)/backend.hcl; } $(L)
+	@{ $(call linode-api-token,tf-init,linodes:read_write firewall:read_write events:read_only images:read_only object_storage:read_write,TF_VAR_linode_token) \
+	  $(call tf-obj-key,tf-init) \
+	  cd $(TF_DIR) && terraform init -reconfigure -json ; } $(L)
+
+.PHONY: tf-init-bucket
+tf-init-bucket: ## Create the Linode Object Storage bucket for Terraform state (idempotent — skips if bucket already exists)
+	@if cd $(SCRIPTS_DIR) && uv run linode-cli object-storage buckets-list --json 2>/dev/null \
+	      | python3 -c "import sys,json; data=sys.stdin.read(); exit(0 if data.strip() and any(b['label']=='$(TF_STATE_BUCKET)' for b in json.loads(data)) else 1)"; then \
+	    echo "Bucket $(TF_STATE_BUCKET) already exists — skipping"; \
+	  else \
+	    echo "Creating bucket $(TF_STATE_BUCKET)..."; \
+	    uv run linode-cli obj mb $(TF_STATE_BUCKET) --cluster $(TF_STATE_CLUSTER); \
+	  fi
 
 .PHONY: tf-plan
-tf-plan: ## Run terraform plan (writes plan to /tmp/tfplan.binary)
+tf-plan: ## Run terraform plan — generates a temporary Linode token and OBJ key automatically
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && OTEL_TRACES_EXPORTER=otlp terraform plan -out=/tmp/tfplan.binary; } $(L)
+	@{ $(call linode-api-token,tf-plan,linodes:read_write firewall:read_write events:read_only images:read_only object_storage:read_write,TF_VAR_linode_token) \
+	  $(call tf-obj-key,tf-plan) \
+	  cd $(TF_DIR) && \
+	    $(OTEL_ENV) terraform plan -out=/tmp/tfplan.binary -json ; } $(L)
 
-.PHONY: tf-apply
-tf-apply: ## Apply the last plan produced by `make plan`
+.PHONY: tf-deploy
+tf-deploy: ## Deploy gateway — generates a temporary Linode token and OBJ key automatically
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && OTEL_TRACES_EXPORTER=otlp terraform apply /tmp/tfplan.binary; } $(L)
+	@{ $(call linode-api-token,tf-deploy,linodes:read_write firewall:read_write events:read_only images:read_only object_storage:read_write,TF_VAR_linode_token) \
+	  $(call tf-obj-key,tf-deploy) \
+	  export TF_LOG="debug" ; \
+	  cd $(TF_DIR) && \
+	    $(OTEL_ENV) terraform apply -json /tmp/tfplan.binary; } $(L)
+
+.PHONY: tf-debug-bucket
+tf-debug-bucket: ## Debug: create a temp OBJ key and list the Terraform state bucket with aws s3 ls
+	@mkdir -p $(LOG_DIR)
+	@{ $(call tf-obj-key,tf-debug) \
+	  echo "--- Credentials ---"; \
+	  echo "AWS_ACCESS_KEY_ID=$$AWS_ACCESS_KEY_ID"; \
+	  echo "AWS_SECRET_ACCESS_KEY=$$AWS_SECRET_ACCESS_KEY"; \
+	  echo "--- Listing s3://$(TF_STATE_BUCKET) ---"; \
+	  aws s3 ls s3://$(TF_STATE_BUCKET)/ \
+	    --endpoint-url https://$(TF_STATE_ENDPOINT) \
+	    --region $(TF_STATE_CLUSTER); \
+	  echo "--- Write test ---"; \
+	  echo "ok" > /tmp/.tf-debug-write-test; \
+	  aws s3 cp /tmp/.tf-debug-write-test s3://$(TF_STATE_BUCKET)/.debug-write-test \
+	    --endpoint-url https://$(TF_STATE_ENDPOINT) \
+	    --region $(TF_STATE_CLUSTER) || true; \
+	  echo "--- List after write (confirms if write landed) ---"; \
+	  aws s3 ls s3://$(TF_STATE_BUCKET)/ \
+	    --endpoint-url https://$(TF_STATE_ENDPOINT) \
+	    --region $(TF_STATE_CLUSTER); \
+	  echo "--- Cleanup ---"; \
+	  aws s3 rm s3://$(TF_STATE_BUCKET)/.debug-write-test \
+	    --endpoint-url https://$(TF_STATE_ENDPOINT) \
+	    --region $(TF_STATE_CLUSTER) || true; } $(L)
 
 .PHONY: tf-destroy
 tf-destroy: ## Destroy all managed infrastructure (prompts for confirmation)
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && OTEL_TRACES_EXPORTER=otlp terraform destroy; } $(L)
+	@{ cd $(TF_DIR) && $(OTEL_ENV) terraform destroy -json ; } $(L)
 
 .PHONY: tf-fmt
 tf-fmt: ## Run terraform fmt recursively
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && terraform fmt -recursive; } $(L)
+	@{ cd $(TF_DIR) && terraform fmt -recursive; } $(L)
 
 .PHONY: tf-lint
 tf-lint: ## Check Terraform formatting without modifying files (no provider init required)
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && terraform fmt -check -recursive; } $(L)
+	@{ cd $(TF_DIR) && terraform fmt -check -recursive; } $(L)
 
 .PHONY: tf-validate
 tf-validate: ## Run terraform validate (requires terraform init first)
 	@mkdir -p $(LOG_DIR)
-	{ cd $(TF_DIR) && terraform validate; } $(L)
+	@{ cd $(TF_DIR) && terraform validate; } $(L)
 
 ## CI — local act runs
-# GITHUB_TOKEN is injected automatically via `gh auth token`.
-# Other secret env vars (LINODE_TOKEN etc.) must be set before running these targets.
+# GITHUB_TOKEN and LINODE_TOKEN are injected automatically for all act targets.
+# LINODE_TOKEN is a temporary full-permission token generated by linode-act-token.
 
 .PHONY: ci-pre-commit
 ci-pre-commit: ## Run the pre-commit workflow locally via act
 	@mkdir -p $(LOG_DIR)
-	{ act push --json $(ACT_FLAGS) \
+	@{ $(call linode-act-token) \
+	  act push --json $(ACT_FLAGS) \
 	  --workflows .github/workflows/pre-commit.yml; } $(L)
 
 .PHONY: ci-unit-tests
 ci-unit-tests: ## Run the unit-tests workflow locally via act
 	@mkdir -p $(LOG_DIR)
-	{ act push --json $(ACT_FLAGS) \
+	@{ $(call linode-act-token) \
+	  act push --json $(ACT_FLAGS) \
 	  --workflows .github/workflows/unit-tests.yml; } $(L)
 
 .PHONY: ci-molecule-gateway
 ci-molecule-gateway: ## Run the molecule-gateway workflow locally via act
 	@mkdir -p $(LOG_DIR)
-	{ act workflow_dispatch --json $(ACT_FLAGS) \
+	@{ $(call linode-act-token) \
+	  act workflow_dispatch --json $(ACT_FLAGS) \
 	  --workflows .github/workflows/molecule-gateway.yml; } $(L)
 
 .PHONY: ci-packer-build
-ci-packer-build: ## Run the packer-build workflow locally via act (requires LINODE_TOKEN)
+ci-packer-build: ## Run the packer-build workflow locally via act
 	@mkdir -p $(LOG_DIR)
-	{ act push --json $(ACT_FLAGS) \
-	  --secret LINODE_TOKEN="$(LINODE_TOKEN)" \
+	@{ $(call linode-act-token) \
+	  act push --json $(ACT_FLAGS) \
 	  --workflows .github/workflows/packer-build.yml; } $(L)
 
 .PHONY: ci-mikrotik
 ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MIKROTIK_USERNAME, MIKROTIK_PASSWORD, MIKROTIK_WG_GATEWAY_ENDPOINT)
 	@mkdir -p $(LOG_DIR)
-	{ act workflow_dispatch --json $(ACT_FLAGS) \
+	@{ $(call linode-act-token) \
+	  act workflow_dispatch --json $(ACT_FLAGS) \
 	  --secret MIKROTIK_HOST="$(MIKROTIK_HOST)" \
 	  --secret MIKROTIK_USERNAME="$(MIKROTIK_USERNAME)" \
 	  --secret MIKROTIK_PASSWORD="$(MIKROTIK_PASSWORD)" \
@@ -134,12 +246,20 @@ ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MI
 	  --secret MIKROTIK_WG_GATEWAY_ENDPOINT="$(MIKROTIK_WG_GATEWAY_ENDPOINT)" \
 	  --workflows .github/workflows/mikrotik.yml; } $(L)
 
-.PHONY: ci-terraform-apply
-ci-terraform-apply: ## Manually run terraform-apply via act (requires LINODE_TOKEN, TF_STATE_*, TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE, GATEWAY_IMAGE)
+.PHONY: ci-terraform-plan
+ci-terraform-plan: ## Run the terraform-plan PR check locally via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE)
 	@mkdir -p $(LOG_DIR)
-	{ act workflow_dispatch --json $(ACT_FLAGS) \
-	  --input gateway_image="$(GATEWAY_IMAGE)" \
-	  --secret LINODE_TOKEN="$(LINODE_TOKEN)" \
+	@{ $(call linode-act-token) \
+	  act pull_request --json $(ACT_FLAGS) \
+	  --secret TF_SSH_PUBLIC_KEY="$(TF_SSH_PUBLIC_KEY)" \
+	  --secret TF_ALLOWED_IP_RANGE="$(TF_ALLOWED_IP_RANGE)" \
+	  --workflows .github/workflows/terraform-plan.yml; } $(L)
+
+.PHONY: ci-terraform-apply
+ci-terraform-apply: ## Manually run terraform-apply via act (requires TF_SSH_PUBLIC_KEY, TF_ALLOWED_IP_RANGE)
+	@mkdir -p $(LOG_DIR)
+	@{ $(call linode-act-token) \
+	  act workflow_dispatch --json $(ACT_FLAGS) \
 	  --secret TF_STATE_BUCKET="$(TF_STATE_BUCKET)" \
 	  --secret TF_STATE_REGION="$(TF_STATE_REGION)" \
 	  --secret TF_STATE_ENDPOINT="$(TF_STATE_ENDPOINT)" \
@@ -154,7 +274,7 @@ ci-terraform-apply: ## Manually run terraform-apply via act (requires LINODE_TOK
 .PHONY: generate-wireguard-keys
 generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg)
 	@mkdir -p $(SECRETS_DIR)
-	{ changed=0; \
+	@{ changed=0; \
 	  if [ ! -f $(SECRETS_DIR)/wireguard_gateway_private.key ]; then \
 	    wg genkey | tee $(SECRETS_DIR)/wireguard_gateway_private.key | wg pubkey > $(SECRETS_DIR)/wireguard_gateway_public.key; \
 	    chmod 600 $(SECRETS_DIR)/wireguard_gateway_private.key; \
@@ -177,17 +297,17 @@ generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTi
 .PHONY: upload-secrets
 upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions
 	@mkdir -p $(LOG_DIR)
-	{ $(SCRIPTS_DIR)/upload-secrets.sh; } $(L)
+	@{ $(SCRIPTS_DIR)/upload-secrets.sh; } $(L)
 
 .PHONY: setup-oauth
 setup-oauth: ## Create the GitHub OAuth App for Grafana SSO (writes to secrets/)
 	@mkdir -p $(LOG_DIR)
-	{ $(SCRIPTS_DIR)/setup-github-oauth.sh; } $(L)
+	@{ $(SCRIPTS_DIR)/setup-github-oauth.sh; } $(L)
 
 .PHONY: generate-grafana-key
 generate-grafana-key: ## Generate a new Grafana session signing key (secrets/grafana_secret_key)
 	@mkdir -p $(LOG_DIR)
-	{ if [ -f $(SECRETS_DIR)/grafana_secret_key ]; then \
+	@{ if [ -f $(SECRETS_DIR)/grafana_secret_key ]; then \
 	    echo "secrets/grafana_secret_key already exists. Delete it first if you want to regenerate."; \
 	    exit 1; \
 	  fi; \
@@ -201,8 +321,8 @@ generate-grafana-key: ## Generate a new Grafana session signing key (secrets/gra
 .PHONY: setup
 setup: ## Install all Python dependencies (ansible/ and scripts/ virtual environments)
 	@mkdir -p $(LOG_DIR)
-	{ cd $(ANSIBLE_DIR) && uv sync; } $(L)
-	{ cd $(SCRIPTS_DIR) && uv sync; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv sync; } $(L)
+	@{ cd $(SCRIPTS_DIR) && uv sync; } $(L)
 
 ## Linting
 
@@ -212,43 +332,43 @@ lint: lint-python ansible-lint tf-lint packer-validate otelcol-validate promethe
 .PHONY: lint-python
 lint-python: ## Lint all Python code with ruff (scripts/ and ansible/)
 	@mkdir -p $(LOG_DIR)
-	{ cd $(SCRIPTS_DIR) && uv run ruff check .; } $(L)
-	{ cd $(ANSIBLE_DIR) && uv run ruff check .; } $(L)
+	@{ cd $(SCRIPTS_DIR) && uv run ruff check .; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run ruff check .; } $(L)
 
 ## Ansible
 
 .PHONY: ansible-lint
 ansible-lint: ## Lint Ansible roles and modules with ansible-lint
 	@mkdir -p $(LOG_DIR)
-	{ cd $(ANSIBLE_DIR) && uv run ansible-lint -f json; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run ansible-lint -f json; } $(L)
 
 .PHONY: ansible-molecule
 ansible-molecule: ## Run molecule integration tests for all roles (Docker, systemd-compatible containers)
 	@mkdir -p $(LOG_DIR)
-	{ for role in $(ANSIBLE_DIR)/roles/*/; do \
+	@{ for role in $(ANSIBLE_DIR)/roles/*/; do \
 		(cd "$$role" && uv run molecule test); \
 	done; } $(L)
 
 .PHONY: ansible-molecule-gateway
 ansible-molecule-gateway: ## Run molecule integration tests for the gateway role
 	@mkdir -p $(LOG_DIR)
-	{ cd "$(ANSIBLE_DIR)/roles/gateway" && uv run molecule test; } $(L)
+	@{ cd "$(ANSIBLE_DIR)/roles/gateway" && uv run molecule test; } $(L)
 
 .PHONY: ansible-molecule-common
 ansible-molecule-common: ## Run molecule integration tests for the common role
 	@mkdir -p $(LOG_DIR)
-	{ cd "$(ANSIBLE_DIR)/roles/common" && uv run molecule test; } $(L)
+	@{ cd "$(ANSIBLE_DIR)/roles/common" && uv run molecule test; } $(L)
 
 .PHONY: ansible-pytest
 ansible-pytest: ## Run pytest unit tests for custom Ansible modules
 	@mkdir -p $(LOG_DIR)
-	{ cd $(ANSIBLE_DIR) && uv run pytest tests/unit/ -v; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run pytest tests/unit/ -v; } $(L)
 
 .PHONY: ansible-doc
 ansible-doc: ## Generate documentation for all custom Ansible modules into docs/ansible-modules/
 	@mkdir -p $(LOG_DIR)
 	@mkdir -p docs/ansible-modules
-	{ for role_lib in $(ANSIBLE_DIR)/roles/*/library; do \
+	@{ for role_lib in $(ANSIBLE_DIR)/roles/*/library; do \
 		for module in "$$role_lib"/*.py; do \
 			[ -f "$$module" ] || continue; \
 			name=$$(basename "$$module" .py); \
@@ -264,49 +384,30 @@ ansible-doc: ## Generate documentation for all custom Ansible modules into docs/
 linode-login: ## Authenticate the Linode CLI via browser (writes to ~/.config/linode-cli)
 	cd $(SCRIPTS_DIR) && uv run linode-cli configure
 
-.PHONY: linode-packer-token
-linode-packer-token: ## Create a Linode packer API token expiring in 24 hours (linodes + images read/write, event read_only) - DO NOT LOG
-	@mkdir -p $(LOG_DIR)
-	EXPIRY=$$(date -u -d '+1 day' '+%Y-%m-%dT%H:%M:%S'); \
-	cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
-	    --label "packer-$$(date -u '+%Y%m%d')" \
-	    --expiry "$$EXPIRY" \
-	    --scopes "linodes:read_write images:read_write events:read_only" \
-	    --json --pretty;
-
-.PHONY: linode-deploy-token
-linode-deploy-token: ## Create a Linode API token for Terraform deployments (linodes + firewall read/write) - DO NOT LOG
-	@mkdir -p $(LOG_DIR)
-	EXPIRY=$$(date -u -d '+1 day' '+%Y-%m-%dT%H:%M:%S'); \
-	cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
-	    --label "terraform-$$(date -u '+%Y%m%d')" \
-	    --expiry "$$EXPIRY" \
-	    --scopes "linodes:read_write firewall:read_write events:read_only" \
-	    --json --pretty;
-
 ## Packer — image builds
 
 .PHONY: packer-init
 packer-init: ## Initialise Packer plugins for all builds (run once after checkout)
 	@mkdir -p $(LOG_DIR)
-	{ cd packer/gateway && packer init .; } $(L)
+	@{ cd packer/gateway && packer init .; } $(L)
 
 .PHONY: packer-build-gateway
-packer-build-gateway: ## Build the Alpine gateway image (WireGuard, Blocky, Nginx) and upload it to Linode
+packer-build-gateway: ## Build the Alpine gateway image — generates a temporary Linode token automatically
 	@mkdir -p $(LOG_DIR)
-	{ flag=$$([ -f packer/gateway/vars.pkrvars.hcl ] && echo "-var-file=vars.pkrvars.hcl"); \
+	@{ $(call linode-api-token,packer-build,linodes:read_write images:read_write events:read_only,PKR_VAR_linode_token) \
+	  flag=$$([ -f packer/gateway/vars.pkrvars.hcl ] && echo "-var-file=vars.pkrvars.hcl"); \
 	  cd packer/gateway && packer build $$flag .; } $(L)
 
 .PHONY: packer-validate
 packer-validate: packer-init ## Validate all Packer configurations without building
 	@mkdir -p $(LOG_DIR)
-	{ flag=$$([ -f packer/gateway/vars.pkrvars.hcl ] && echo "-var-file=vars.pkrvars.hcl"); \
+	@{ flag=$$([ -f packer/gateway/vars.pkrvars.hcl ] && echo "-var-file=vars.pkrvars.hcl"); \
 	  cd packer/gateway && packer validate $$flag .; } $(L)
 
 .PHONY: packer-fmt
 packer-fmt: ## Format Packer configuration (all builds)
 	@mkdir -p $(LOG_DIR)
-	{ cd packer && packer fmt -recursive .; } $(L)
+	@{ cd packer && packer fmt -recursive .; } $(L)
 
 ## Development
 
@@ -319,7 +420,7 @@ dev-volumes: ## Create persistent telemetry volumes (idempotent — safe to run 
 .PHONY: dev-secrets
 dev-secrets: ## Generate dev Grafana admin + renderer credentials (secrets/dev-grafana.env) — skips if already present
 	@mkdir -p $(SECRETS_DIR)
-	{ if [ -f $(SECRETS_DIR)/dev-grafana.env ]; then \
+	@{ if [ -f $(SECRETS_DIR)/dev-grafana.env ]; then \
 	    echo "$(SECRETS_DIR)/dev-grafana.env already exists — delete it to regenerate."; \
 	  else \
 	    password=$$(openssl rand -hex 16); \
@@ -333,7 +434,7 @@ dev-secrets: ## Generate dev Grafana admin + renderer credentials (secrets/dev-g
 .PHONY: dev-backup-secrets
 dev-backup-secrets: ## Generate secrets/dev-backup.env with a random GPG passphrase and S3 credential placeholders
 	@mkdir -p $(SECRETS_DIR)
-	{ if [ -f $(SECRETS_DIR)/dev-backup.env ]; then \
+	@{ if [ -f $(SECRETS_DIR)/dev-backup.env ]; then \
 	    echo "$(SECRETS_DIR)/dev-backup.env already exists — delete it to regenerate."; \
 	  else \
 	    passphrase=$$(openssl rand -hex 32); \
@@ -372,7 +473,7 @@ dev-restore: ## Restore dev volumes from S3 (latest backup). Pass FILE=<name> to
 .PHONY: otelcol-validate
 otelcol-validate: ## Validate otelcol configs against otelcol-contrib $(OTELCOL_VERSION) (bundled in grafana/otel-lgtm)
 	@mkdir -p $(LOG_DIR)
-	{ docker run --rm \
+	@{ docker run --rm \
 		-v "$(CURDIR)/$(DEV_DIR)/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro" \
 		--entrypoint="" \
 		grafana/otel-lgtm:$(LGTM_VERSION) \
@@ -383,7 +484,7 @@ otelcol-validate: ## Validate otelcol configs against otelcol-contrib $(OTELCOL_
 .PHONY: blocky-validate
 blocky-validate: ## Validate blocky config with blocky v$(BLOCKY_VERSION)
 	@mkdir -p $(LOG_DIR)
-	{ docker run --rm \
+	@{ docker run --rm \
 		-v "$(CURDIR)/$(ANSIBLE_DIR)/roles/gateway/files/blocky-default.yaml:/etc/blocky/config.yaml:ro" \
 		ghcr.io/0xerr0r/blocky:v$(BLOCKY_VERSION) \
 		validate -c /etc/blocky/config.yaml; } $(L)
@@ -391,7 +492,7 @@ blocky-validate: ## Validate blocky config with blocky v$(BLOCKY_VERSION)
 .PHONY: prometheus-validate
 prometheus-validate: ## Validate prometheus config with promtool $(PROMETHEUS_VERSION) (bundled in grafana/otel-lgtm)
 	@mkdir -p $(LOG_DIR)
-	{ docker run --rm \
+	@{ docker run --rm \
 		-v "$(CURDIR)/$(DEV_DIR)/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro" \
 		--entrypoint="" \
 		grafana/otel-lgtm:$(LGTM_VERSION) \
@@ -401,23 +502,25 @@ prometheus-validate: ## Validate prometheus config with promtool $(PROMETHEUS_VE
 .PHONY: dev-up
 dev-up: dev-volumes ## Start the local LGTM development stack (Grafana on :3000, anonymous admin)
 	@mkdir -p $(LOG_DIR)
-	{ docker compose -f $(DEV_DIR)/docker-compose.yml up -d --wait ; } $(L)
+	@{ docker compose -f $(DEV_DIR)/docker-compose.yml up -d --wait ; } $(L)
 
 .PHONY: dev-down
 dev-down: ## Stop and remove the local LGTM development stack
 	@mkdir -p $(LOG_DIR)
-	{ docker compose -f $(DEV_DIR)/docker-compose.yml down; } $(L)
+	@{ docker compose -f $(DEV_DIR)/docker-compose.yml down; } $(L)
 
 .PHONY: dev-logs
 dev-logs: ## Tail logs from all development stack services
 	docker compose -f $(DEV_DIR)/docker-compose.yml logs -f
 
+# 10.10.10.1/32
+# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINigPbjmFlc9mo5BKilyy+spKcvXRLJLRidEcBLIX4Vp aidanhall34
 ## Scripts container
 
 .PHONY: build
 build: ## Build the scripts container image (aidanhall34/homelab:latest)
 	@mkdir -p $(LOG_DIR)
-	{ docker build \
+	@{ docker build \
 		--progress rawjson \
 		-t aidanhall34/homelab:latest \
 		$(SCRIPTS_DIR); } $(L)
@@ -427,5 +530,4 @@ build: ## Build the scripts container image (aidanhall34/homelab:latest)
 .PHONY: readme
 readme: ## Regenerate README.md from README.md.tpl and Makefile comments
 	@mkdir -p $(LOG_DIR)
-	{ uv run --python 3.13 $(SCRIPTS_DIR)/generate-readme.py; } $(L)
-
+	@{ uv run --python 3.13 $(SCRIPTS_DIR)/generate-readme.py; } $(L)

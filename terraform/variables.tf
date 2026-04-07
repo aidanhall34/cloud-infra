@@ -16,11 +16,6 @@ variable "instance_type" {
   default     = "g6-nanode-1"
 }
 
-variable "gateway_image" {
-  description = "Linode image ID for the gateway — set to the private image produced by `make packer-build-gateway` (e.g. private/12345678)"
-  type        = string
-}
-
 variable "ssh_public_key" {
   description = "SSH public key for root access to the gateway"
   type        = string

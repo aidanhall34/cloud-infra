@@ -2,7 +2,7 @@ resource "linode_instance" "gateway" {
   label  = "gateway"
   region = var.linode_region
   type   = var.instance_type
-  image  = var.gateway_image
+  image  = data.linode_images.gateway.images[0].id
 
   authorized_keys = [var.ssh_public_key]
 

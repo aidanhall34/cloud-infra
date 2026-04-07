@@ -16,11 +16,9 @@ linode_region = "ap-southeast"
 instance_type = "g6-nanode-1"
 
 # ── Gateway image ──────────────────────────────────────────────────────────────
-# Linode image ID produced by `make packer-build-gateway`.
-# Find it at: https://cloud.linode.com/images  or via:
-#   linode-cli images list --json --pretty | jq '.[] | select(.label | startswith("alpine-gateway"))'
-
-gateway_image = "private/12345678"
+# Resolved automatically at plan/apply time via the linode_images data source.
+# Terraform selects the latest private image whose label contains "alpine-gateway-".
+# No variable needed — run `make packer-build-gateway` before `make tf-apply`.
 
 # ── Access ─────────────────────────────────────────────────────────────────────
 

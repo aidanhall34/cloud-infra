@@ -14,8 +14,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      image_id: ${{ steps.image.outputs.image_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,41 +27,19 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python venvs
-        run: make setup
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
       - name: Setup Packer
         uses: hashicorp/setup-packer@v3
 
       - name: Packer init
-        run: make packer-init
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} packer-init
 
       - name: Build gateway image
         env:
-          PKR_VAR_linode_token: ${{ secrets.LINODE_TOKEN }}
-        run: make packer-build-gateway
-
-      - name: Get image ID
-        id: image
-        env:
-          LINODE_CLI_TOKEN: ${{ secrets.LINODE_TOKEN }}
-        run: |
-          image_id=$(cd scripts && uv run linode-cli images list --json \
-            | python3 -c "
-import sys, json
-imgs = [i for i in json.load(sys.stdin)
-        if not i.get('is_public', True) and i.get('label', '').startswith('alpine-gateway-')]
-imgs.sort(key=lambda i: i['created'])
-print(imgs[-1]['id'])
-")
-          echo "image_id=${image_id}" >> "$GITHUB_OUTPUT"
-          echo "${image_id}" > image_id.txt
-
-      - name: Upload image ID artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: packer-image-id
-          path: image_id.txt
-          retention-days: 1
+          LINODE_CLI_TOKEN:            ${{ secrets.LINODE_TOKEN }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_ENDPOINT }}
+        run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} packer-build-gateway
 
       - name: Notify Discord
         if: always()

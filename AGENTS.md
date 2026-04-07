@@ -58,3 +58,7 @@
 # Coding conventions
 
 - Code should be `dry`. Where possible, link to files and modules instead of copying.
+
+# CI conventions
+
+- Github actions are used for CI
