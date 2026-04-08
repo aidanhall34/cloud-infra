@@ -64,6 +64,10 @@ runs:
 
         run_label="${RUN_NUMBER:-N/A}"
 
+        repo_field=""
+        [ -n "$REPO" ] && \
+          repo_field=", { \"name\": \"Repo\", \"value\": \"$REPO\", \"inline\": false }"
+
         payload=$(cat <<JSON
         {
           "embeds": [{
@@ -76,6 +80,7 @@ runs:
               { "name": "Started",  "value": "$start_iso",   "inline": false },
               { "name": "Finished", "value": "$end_iso",     "inline": false },
               { "name": "Duration", "value": "$duration",    "inline": true }
+              $repo_field
             ]
           }]
         }
