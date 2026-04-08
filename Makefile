@@ -49,8 +49,10 @@ OTEL_ENV := OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp \
 # act: use the medium-sized runner image and inject the GitHub token via gh CLI.
 # GITHUB_TOKEN defaults to `gh auth token` — override in the environment if needed.
 # DISCORD_WEBHOOK_URL is read from secrets/discord_webhook_url — override in the environment if needed.
-GITHUB_TOKEN         ?= $(shell gh auth token)
-DISCORD_WEBHOOK_URL  ?= $(shell cat $(SECRETS_DIR)/discord_webhook_url 2>/dev/null)
+GITHUB_TOKEN               ?= $(shell gh auth token)
+DISCORD_WEBHOOK_URL        ?= $(shell cat $(SECRETS_DIR)/discord_webhook_url 2>/dev/null)
+# Override to use a different webhook for backup notifications (defaults to DISCORD_WEBHOOK_URL).
+BACKUP_DISCORD_WEBHOOK_URL ?= $(DISCORD_WEBHOOK_URL)
 ACT_FLAGS            := --platform ubuntu-latest=catthehacker/ubuntu:act-latest \
                         --container-options "--add-host=host.docker.internal:host-gateway" \
                         --env OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317 \
@@ -257,7 +259,7 @@ upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions
 configure-branch-protection: ## Configure main branch protection rules via GitHub CLI (idempotent)
 	@repo=$$(gh repo view --json nameWithOwner -q .nameWithOwner); \
 	echo "Configuring branch protection for $$repo/main..."; \
-	echo '{"required_status_checks":{"strict":false,"checks":[{"context":"molecule/gate"},{"context":"terraform-plan"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
+	echo '{"required_status_checks":{"strict":false,"checks":[{"context":"pre-commit / lint"},{"context":"unit-tests / pytest"},{"context":"molecule/gate"},{"context":"terraform-plan"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
 	  | gh api --method PUT "/repos/$$repo/branches/main/protection" --input -; \
 	echo "Branch protection configured."
 
@@ -426,12 +428,17 @@ dev-secrets: ## Generate dev Grafana admin + renderer credentials (secrets/dev-g
 	  fi; } $(L)
 
 .PHONY: dev-backup-secrets
-dev-backup-secrets: ## Generate secrets/dev-backup.env with a random GPG passphrase and S3 credential placeholders
+dev-backup-secrets: ## Generate secrets/dev-backup.env with GPG passphrase, S3 placeholders, and Discord notification URL
 	@mkdir -p $(SECRETS_DIR)
 	@{ if [ -f $(SECRETS_DIR)/dev-backup.env ]; then \
 	    echo "$(SECRETS_DIR)/dev-backup.env already exists — delete it to regenerate."; \
 	  else \
 	    passphrase=$$(openssl rand -hex 32); \
+	    notification_url=""; \
+	    if [ -n "$(BACKUP_DISCORD_WEBHOOK_URL)" ]; then \
+	      notification_url=$$(printf '%s' "$(BACKUP_DISCORD_WEBHOOK_URL)" \
+	        | sed -E 's|https://[^/]+/api/webhooks/([^/]+)/(.+)|discord://\2@\1|'); \
+	    fi; \
 	    { printf '# S3-compatible object storage credentials for offen/docker-volume-backup.\n'; \
 	      printf '# Supports AWS S3, Cloudflare R2, Backblaze B2, MinIO, etc.\n'; \
 	      printf '# Fill in the S3 values below, then run: make dev-up\n'; \
@@ -450,15 +457,27 @@ dev-backup-secrets: ## Generate secrets/dev-backup.env with a random GPG passphr
 	      printf '# Backups are encrypted with this key before upload. Keep it safe:\n'; \
 	      printf '# losing it makes existing backups unrecoverable.\n'; \
 	      printf 'GPG_PASSPHRASE=%s\n' "$$passphrase"; \
+	      printf '#\n'; \
+	      printf '# Discord notifications via shoutrrr (discord://TOKEN@ID format).\n'; \
+	      printf '# Derived from BACKUP_DISCORD_WEBHOOK_URL at generation time.\n'; \
+	      printf '# To use a different webhook: delete this file and re-run:\n'; \
+	      printf '#   make dev-backup-secrets BACKUP_DISCORD_WEBHOOK_URL=<webhook-url>\n'; \
+	      printf 'NOTIFICATION_LEVEL=info\n'; \
+	      printf 'NOTIFICATION_URLS=%s\n' "$$notification_url"; \
 	    } > $(SECRETS_DIR)/dev-backup.env; \
 	    chmod 600 $(SECRETS_DIR)/dev-backup.env; \
 	    echo "Generated $(SECRETS_DIR)/dev-backup.env"; \
+	    if [ -n "$$notification_url" ]; then \
+	      echo "  Discord notifications: $$notification_url"; \
+	    else \
+	      echo "  No BACKUP_DISCORD_WEBHOOK_URL set — NOTIFICATION_URLS left empty."; \
+	    fi; \
 	    echo "  GPG passphrase written — fill in S3 credentials before running make dev-up"; \
 	  fi; }
 
 .PHONY: dev-backup
-dev-backup: ## Trigger an ad-hoc backup of all dev volumes to S3 (Prometheus TSDB snapshot taken first via exec-pre hook)
-	docker exec dev-backup backup
+dev-backup: ## Trigger an ad-hoc backup of all dev volumes to S3; execs into the running daemon or starts a one-off instant container
+	docker compose -f $(DEV_DIR)/docker-compose.yml --profile instant run --rm --no-deps backup-instant;
 
 .PHONY: dev-restore
 dev-restore: ## Restore dev volumes from S3 (latest backup). Pass FILE=<name> to restore a specific backup.
@@ -494,18 +513,18 @@ prometheus-validate: ## Validate prometheus config with promtool $(PROMETHEUS_VE
 			/etc/prometheus/prometheus.yaml; } $(L)
 
 .PHONY: dev-up
-dev-up: dev-volumes ## Start the local LGTM development stack (Grafana on :3000, anonymous admin)
+dev-up: dev-volumes ## Start the local LGTM development stack (Grafana on :3000, anonymous admin) with scheduled backup daemon
 	@mkdir -p $(LOG_DIR)
-	@{ docker compose -f $(DEV_DIR)/docker-compose.yml up -d --wait ; } $(L)
+	@{ docker compose -f $(DEV_DIR)/docker-compose.yml --profile scheduled up -d --wait ; } $(L)
 
 .PHONY: dev-down
 dev-down: ## Stop and remove the local LGTM development stack
 	@mkdir -p $(LOG_DIR)
-	@{ docker compose -f $(DEV_DIR)/docker-compose.yml down; } $(L)
+	@{ docker compose -f $(DEV_DIR)/docker-compose.yml --profile scheduled down; } $(L)
 
 .PHONY: dev-logs
 dev-logs: ## Tail logs from all development stack services
-	docker compose -f $(DEV_DIR)/docker-compose.yml logs -f
+	docker compose -f $(DEV_DIR)/docker-compose.yml --profile scheduled logs -f
 
 # 10.10.10.1/32
 # ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINigPbjmFlc9mo5BKilyy+spKcvXRLJLRidEcBLIX4Vp aidanhall34
