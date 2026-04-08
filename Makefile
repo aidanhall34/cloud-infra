@@ -228,7 +228,7 @@ ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MI
 ## Secrets and credentials
 
 .PHONY: generate-wireguard-keys
-generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg)
+generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg) - DO NOT LOG
 	@mkdir -p $(SECRETS_DIR)
 	@{ changed=0; \
 	  if [ ! -f $(SECRETS_DIR)/wireguard_gateway_private.key ]; then \
@@ -251,15 +251,15 @@ generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTi
 	  echo "MikroTik public key: $$(cat $(SECRETS_DIR)/wireguard_mikrotik_public.key)"; }
 
 .PHONY: upload-secrets
-upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions
+upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions - DO NOT LOG
 	@mkdir -p $(LOG_DIR)
-	@{ $(SCRIPTS_DIR)/upload-secrets.sh; } $(L)
+	@{ $(SCRIPTS_DIR)/upload-secrets.sh; }
 
 .PHONY: configure-branch-protection
 configure-branch-protection: ## Configure main branch protection rules via GitHub CLI (idempotent)
 	@repo=$$(gh repo view --json nameWithOwner -q .nameWithOwner); \
 	echo "Configuring branch protection for $$repo/main..."; \
-	echo '{"required_status_checks":{"strict":false,"checks":[{"context":"pre-commit / lint"},{"context":"unit-tests / pytest"},{"context":"molecule/gate"},{"context":"terraform-plan"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
+	echo '{"required_status_checks":{"strict":true,"checks":[{"context":"pre-commit / lint"},{"context":"unit-tests / pytest"},{"context":"molecule/gate"},{"context":"terraform-plan"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
 	  | gh api --method PUT "/repos/$$repo/branches/main/protection" --input -; \
 	echo "Branch protection configured."
 
@@ -526,8 +526,6 @@ dev-down: ## Stop and remove the local LGTM development stack
 dev-logs: ## Tail logs from all development stack services
 	docker compose -f $(DEV_DIR)/docker-compose.yml --profile scheduled logs -f
 
-# 10.10.10.1/32
-# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINigPbjmFlc9mo5BKilyy+spKcvXRLJLRidEcBLIX4Vp aidanhall34
 ## Documentation
 
 .PHONY: readme

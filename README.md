@@ -63,8 +63,8 @@ After installing the tools above, run `make setup` to create the Python virtual 
 
 | Target | Description | Source |
 |---|---|---|
-| `make generate-wireguard-keys` | Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg) | [Makefile:231](Makefile#L231) |
-| `make upload-secrets` | Upload all secrets from secrets/ to GitHub Actions | [Makefile:254](Makefile#L254) |
+| `make generate-wireguard-keys` | Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg) - DO NOT LOG | [Makefile:231](Makefile#L231) |
+| `make upload-secrets` | Upload all secrets from secrets/ to GitHub Actions - DO NOT LOG | [Makefile:254](Makefile#L254) |
 | `make configure-branch-protection` | Configure main branch protection rules via GitHub CLI (idempotent) | [Makefile:259](Makefile#L259) |
 | `make configure-github-app` | Upload GitHub App credentials (APP_ID, APP_PRIVATE_KEY) to cloud-infra and homelab-deploy | [Makefile:267](Makefile#L267) |
 | `make setup-oauth` | Create the GitHub OAuth App for Grafana SSO (writes to secrets/) | [Makefile:279](Makefile#L279) |
@@ -133,5 +133,5 @@ After installing the tools above, run `make setup` to create the Python virtual 
 
 | Target | Description | Source |
 |---|---|---|
-| `make readme` | Regenerate README.md from README.md.tpl and Makefile comments | [Makefile:534](Makefile#L534) |
+| `make readme` | Regenerate README.md from README.md.tpl and Makefile comments | [Makefile:532](Makefile#L532) |
 
