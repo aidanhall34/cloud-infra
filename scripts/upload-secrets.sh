@@ -37,15 +37,31 @@ upload_to_both() {
 }
 
 prompt() {
-  local var_name="$1"
-  local label="$2"
-  local silent="${3:-}"
+  local var_name="$1" ;
+  local label="$2" ;
+  local silent="${3:-}" ;
   if [ -n "$silent" ]; then
-    read -rsp "  $label: " "$var_name"
-    echo
+    read -rsp "  $label: " "$var_name" ;
+    echo ;
   else
-    read -rp "  $label: " "$var_name"
-  fi
+    read -rp "  $label: " "$var_name" ;
+  fi ;
+}
+
+prompt_or_cache () {
+  prompt $1 $2
+  if [ ! -z "${!1}" ] ;
+  then
+    echo "Writing $1 to $3" ;
+    echo "${!1}" > "$3" ; # Overwrite the value if a new one is provided
+  elif [ -s "$3" ] ;
+  then
+    echo "Reading from $3" ;
+    export "$1=$(cat $3)" ;
+  else
+    echo "$1 not provided or cached at $3" ;
+    exit 1 ;
+  fi ;
 }
 
 linode_token_create() {
@@ -71,7 +87,7 @@ echo ""
 echo "── Discord ───────────────────────────────────────────────────────────────"
 echo "  Create a webhook at: Server Settings → Integrations → Webhooks"
 echo ""
-prompt discord_webhook_url "DISCORD_WEBHOOK_URL"
+prompt_or_cache discord_webhook_url "DISCORD_WEBHOOK_URL" "./secrets/discord_webhook_url"
 upload_to_both DISCORD_WEBHOOK_URL "$discord_webhook_url"
 
 # ── Linode API ────────────────────────────────────────────────────────────────
@@ -104,8 +120,10 @@ upload_to "$DEPLOY_REPO" LINODE_TF_TOKEN "$linode_tf_token"
 echo ""
 echo "── Terraform — gateway ───────────────────────────────────────────────────"
 echo ""
-prompt ssh_public_key   "TF_SSH_PUBLIC_KEY   (contents of ~/.ssh/id_ed25519.pub)"
-prompt allowed_ip_range "TF_ALLOWED_IP_RANGE (your home CIDR, e.g. 203.0.113.1/32)"
+
+prompt_or_cache ssh_public_key "TF_SSH_PUBLIC_KEY   (contents of ./secrets/ssh_public_key)" "./secrets/ssh_public_key"
+
+prompt_or_cache allowed_ip_range "TF_ALLOWED_IP_RANGE (your home CIDR, e.g. 203.0.113.1/32)" "./secrets/allowed_ip_range"
 
 upload_to "$DEPLOY_REPO" TF_SSH_PUBLIC_KEY   "$ssh_public_key"
 upload_to "$DEPLOY_REPO" TF_ALLOWED_IP_RANGE "$allowed_ip_range"

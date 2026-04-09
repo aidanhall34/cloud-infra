@@ -9,6 +9,12 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Record start time
+        id: start
+        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Verify terraform-apply status is pending
         env:
           GH_TOKEN: ${{ github.token }}
@@ -40,3 +46,15 @@ jobs:
             -F client_payload[sha]="${{ github.sha }}" \
             -F client_payload[ref]="${{ github.ref }}" \
             -F client_payload[branch]="${{ github.ref_name }}"
+
+      - name: Notify Discord
+        if: always()
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "terraform-apply dispatched — ${{ github.ref_name }}"
+          job-start-time: ${{ steps.start.outputs.ts }}
+          run-id: ${{ github.run_id }}
+          run-number: ${{ github.run_number }}
+          repo: ${{ github.repository }}
