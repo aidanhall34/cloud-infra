@@ -9,11 +9,5 @@
     "OTEL_METRIC_EXPORT_INTERVAL": "5000",
     "OTEL_LOGS_EXPORT_INTERVAL": "5000",
     "OTEL_LOG_TOOL_DETAILS": "1"
-  },
-  "mcpServers": {
-    "grafana": {
-      "type": "sse",
-      "url": "http://localhost:8000/sse"
-    }
   }
 }
