@@ -1,0 +1,4 @@
+[mcp_servers.grafana]
+url = "http://localhost:8000/mcp"
+enabled = true
+required = false

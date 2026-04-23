@@ -1,6 +1,15 @@
 {
+  "telemetry": {
+    "enabled": true,
+    "target": "local"
+  },
+  "mcpServers": {
+    "grafana": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp"
+    }
+  },
   "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
     "OTEL_METRICS_EXPORTER": "otlp",
     "OTEL_LOGS_EXPORTER": "otlp",
     "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
@@ -8,6 +17,6 @@
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "cumulative",
     "OTEL_METRIC_EXPORT_INTERVAL": "5000",
     "OTEL_LOGS_EXPORT_INTERVAL": "5000",
-    "OTEL_LOG_TOOL_DETAILS": "1"
+    "GEMINI_TELEMETRY_TRACES_ENABLED": true
   }
 }

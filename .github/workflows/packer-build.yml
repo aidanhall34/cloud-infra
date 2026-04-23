@@ -18,9 +18,18 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Setup GitHub CLI
+        uses: ./.github/actions/setup-gh
+
+      - name: Record start time
+        id: start
+        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Generate homelab-deploy app token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3.1.1
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -36,3 +45,15 @@ jobs:
             -F client_payload[sha]="${{ github.sha }}" \
             -F client_payload[ref]="${{ github.ref }}" \
             -F client_payload[branch]="${{ github.ref_name }}"
+
+      - name: Notify Discord
+        if: failure()
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          status: ${{ job.status }}
+          title: "packer-build dispatched — ${{ github.ref_name }}"
+          job-start-time: ${{ steps.start.outputs.ts }}
+          run-id: ${{ github.run_id }}
+          run-number: ${{ github.run_number }}
+          repo: ${{ github.repository }}

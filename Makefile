@@ -49,8 +49,10 @@ OTEL_ENV := OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp \
 # act: use the medium-sized runner image and inject the GitHub token via gh CLI.
 # GITHUB_TOKEN defaults to `gh auth token` — override in the environment if needed.
 # DISCORD_WEBHOOK_URL is read from secrets/discord_webhook_url — override in the environment if needed.
-GITHUB_TOKEN         ?= $(shell gh auth token)
-DISCORD_WEBHOOK_URL  ?= $(shell cat $(SECRETS_DIR)/discord_webhook_url 2>/dev/null)
+GITHUB_TOKEN               ?= $(shell gh auth token)
+DISCORD_WEBHOOK_URL        ?= $(shell cat $(SECRETS_DIR)/discord_webhook_url 2>/dev/null)
+# Override to use a different webhook for backup notifications (defaults to DISCORD_WEBHOOK_URL).
+BACKUP_DISCORD_WEBHOOK_URL ?= $(DISCORD_WEBHOOK_URL)
 ACT_FLAGS            := --platform ubuntu-latest=catthehacker/ubuntu:act-latest \
                         --container-options "--add-host=host.docker.internal:host-gateway" \
                         --env OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317 \
@@ -65,29 +67,31 @@ ACT_FLAGS            := --platform ubuntu-latest=catthehacker/ubuntu:act-latest 
 # Usage: $(call linode-api-token,<label-prefix>,<scopes>,<export-var>)
 define linode-api-token
 _parent_token="$$LINODE_CLI_TOKEN"; \
-_token_json=$$(cd $(SCRIPTS_DIR) && uv run --active linode-cli profile token-create \
+_token_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli profile token-create \
     --label "$(1)-$$(date +%s)" \
     --expiry "$$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%S')" \
     --scopes "$(2)" \
     --json); \
+if [ $$? -ne 0 ]; then echo "Error: linode-cli token-create failed"; exit 1; fi; \
 _token_id=$$(echo "$$_token_json" | jq -r '.[0].id'); \
 export LINODE_CLI_TOKEN=$$(echo "$$_token_json" | jq -r '.[0].token'); \
 export $(3)="$$LINODE_CLI_TOKEN"; \
-trap "echo 'Revoking Linode token $$_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$_parent_token\" uv run --active linode-cli profile token-delete $$_token_id" EXIT;
+trap "echo 'Revoking Linode token $$_token_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && LINODE_CLI_TOKEN=\"$$_parent_token\" uv run linode-cli profile token-delete $$_token_id" EXIT;
 endef
 
 # Creates a temporary scoped Linode OBJ key and registers a trap to delete it on
 # shell exit. Expands into a recipe as: $(call tf-obj-key,<label-prefix>)
 # Sets shell vars: key_id, access_key, secret_key.
 define tf-obj-key
-export key_json=$$(cd $(SCRIPTS_DIR) && uv run --active linode-cli object-storage keys-create \
+export key_json=$$(cd $(SCRIPTS_DIR) && uv run linode-cli object-storage keys-create \
     --label "$(1)-$$(date +%s)" \
     --json); \
+if [ $$? -ne 0 ]; then echo "Error: linode-cli keys-create failed"; exit 1; fi; \
 export key_id="$$(echo "$$key_json" | jq -r '.[0].id' )"; \
 export AWS_ACCESS_KEY_ID="$$(echo "$$key_json" | jq -r '.[0].access_key' )"; \
 export AWS_SECRET_ACCESS_KEY="$$(echo "$$key_json" | jq -r '.[0].secret_key' )"; \
 export AWS_REGION="$(TF_STATE_CLUSTER)"; \
-trap "[ -n \"$$key_id\" ] && { echo 'Deleting OBJ key $$key_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run --active linode-cli object-storage keys-delete $$key_id; }" EXIT; \
+trap "[ -n \"$$key_id\" ] && { echo 'Deleting OBJ key $$key_id...'; cd '$(CURDIR)/$(SCRIPTS_DIR)' && uv run linode-cli object-storage keys-delete $$key_id; }" EXIT; \
 echo "Waiting for OBJ key to propagate..."; sleep 10;
 endef
 
@@ -120,12 +124,12 @@ tf-init: ## Initialise Terraform — generates a temporary Linode token and OBJ 
 
 .PHONY: tf-init-bucket
 tf-init-bucket: ## Create the Linode Object Storage bucket for Terraform state (idempotent — skips if bucket already exists)
-	@if cd $(SCRIPTS_DIR) && uv run --active linode-cli object-storage buckets-list --json 2>/dev/null \
+	@if cd $(SCRIPTS_DIR) && uv run linode-cli object-storage buckets-list --json 2>/dev/null \
 	      | python3 -c "import sys,json; data=sys.stdin.read(); exit(0 if data.strip() and any(b['label']=='$(TF_STATE_BUCKET)' for b in json.loads(data)) else 1)"; then \
 	    echo "Bucket $(TF_STATE_BUCKET) already exists — skipping"; \
 	  else \
 	    echo "Creating bucket $(TF_STATE_BUCKET)..."; \
-	    uv run --active linode-cli obj mb $(TF_STATE_BUCKET) --cluster $(TF_STATE_CLUSTER); \
+	    uv run linode-cli obj mb $(TF_STATE_BUCKET) --cluster $(TF_STATE_CLUSTER); \
 	  fi
 
 .PHONY: tf-plan
@@ -226,7 +230,7 @@ ci-mikrotik: ## Configure MikroTik WireGuard via act (requires MIKROTIK_HOST, MI
 ## Secrets and credentials
 
 .PHONY: generate-wireguard-keys
-generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg)
+generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTik (skips existing, requires wg) - DO NOT LOG
 	@mkdir -p $(SECRETS_DIR)
 	@{ changed=0; \
 	  if [ ! -f $(SECRETS_DIR)/wireguard_gateway_private.key ]; then \
@@ -249,15 +253,15 @@ generate-wireguard-keys: ## Generate WireGuard key pairs for gateway and MikroTi
 	  echo "MikroTik public key: $$(cat $(SECRETS_DIR)/wireguard_mikrotik_public.key)"; }
 
 .PHONY: upload-secrets
-upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions
+upload-secrets: ## Upload all secrets from secrets/ to GitHub Actions - DO NOT LOG
 	@mkdir -p $(LOG_DIR)
-	@{ $(SCRIPTS_DIR)/upload-secrets.sh; } $(L)
+	@{ $(SCRIPTS_DIR)/upload-secrets.sh; }
 
 .PHONY: configure-branch-protection
 configure-branch-protection: ## Configure main branch protection rules via GitHub CLI (idempotent)
 	@repo=$$(gh repo view --json nameWithOwner -q .nameWithOwner); \
 	echo "Configuring branch protection for $$repo/main..."; \
-	echo '{"required_status_checks":{"strict":false,"checks":[{"context":"molecule/gate"},{"context":"terraform-plan"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
+	echo '{"required_status_checks":{"strict":true,"checks":[{"context":"pre-commit / lint"},{"context":"unit-tests / pytest"},{"context":"molecule/gate"},{"context":"terraform-plan"}]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' \
 	  | gh api --method PUT "/repos/$$repo/branches/main/protection" --input -; \
 	echo "Branch protection configured."
 
@@ -315,47 +319,47 @@ lint: lint-python mypy-scripts mypy-ansible ansible-lint tf-lint packer-validate
 .PHONY: lint-python
 lint-python: ## Lint all Python code with ruff (scripts/ and ansible/)
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(SCRIPTS_DIR) && uv run --active ruff check .; } $(L)
-	@{ cd $(ANSIBLE_DIR) && uv run --active ruff check .; } $(L)
+	@{ cd $(SCRIPTS_DIR) && uv run ruff check .; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run ruff check .; } $(L)
 
 .PHONY: mypy-scripts
 mypy-scripts: ## Type-check scripts/ with mypy — files discovered via scripts/pyproject.toml
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(SCRIPTS_DIR) && uv run --active mypy .; } $(L)
+	@{ cd $(SCRIPTS_DIR) && uv run mypy .; } $(L)
 
 .PHONY: mypy-ansible
 mypy-ansible: ## Type-check ansible/library and ansible/tests with mypy — files discovered via ansible/pyproject.toml
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(ANSIBLE_DIR) && uv run --active mypy .; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run mypy .; } $(L)
 
 ## Ansible
 
 .PHONY: ansible-lint
 ansible-lint: ## Lint Ansible roles and modules with ansible-lint
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(ANSIBLE_DIR) && uv run --active ansible-lint -f json; } $(L)
+	@{ cd $(ANSIBLE_DIR) && uv run ansible-lint -f json; } $(L)
 
 .PHONY: ansible-molecule
 ansible-molecule: ## Run molecule integration tests for all roles (Docker, systemd-compatible containers)
 	@mkdir -p $(LOG_DIR)
 	@{ for role in $(ANSIBLE_DIR)/roles/*/; do \
-		(cd "$$role" && uv run --active molecule test); \
+		(cd "$$role" && uv run molecule test); \
 	done; } $(L)
 
 .PHONY: ansible-molecule-gateway
 ansible-molecule-gateway: ## Run molecule integration tests for the gateway role
 	@mkdir -p $(LOG_DIR)
-	@{ cd "$(ANSIBLE_DIR)/roles/gateway" && uv run --active molecule test; } $(L)
+	@{ cd "$(ANSIBLE_DIR)/roles/gateway" && uv run molecule test; } $(L)
 
 .PHONY: ansible-molecule-common
 ansible-molecule-common: ## Run molecule integration tests for the common role
 	@mkdir -p $(LOG_DIR)
-	@{ cd "$(ANSIBLE_DIR)/roles/common" && uv run --active molecule test; } $(L)
+	@{ cd "$(ANSIBLE_DIR)/roles/common" && uv run molecule test; } $(L)
 
 .PHONY: ansible-pytest
 ansible-pytest: ## Run pytest unit tests for custom Ansible modules
 	@mkdir -p $(LOG_DIR)
-	@{ cd $(ANSIBLE_DIR) && $(OTEL_ENV) uv run --active pytest tests/unit/ -v; } $(L)
+	@{ cd $(ANSIBLE_DIR) && $(OTEL_ENV) uv run pytest tests/unit/ -v; } $(L)
 
 .PHONY: ansible-doc
 ansible-doc: ## Generate documentation for all custom Ansible modules into docs/ansible-modules/
@@ -366,7 +370,7 @@ ansible-doc: ## Generate documentation for all custom Ansible modules into docs/
 			[ -f "$$module" ] || continue; \
 			name=$$(basename "$$module" .py); \
 			rel=$$(realpath --relative-to=$(ANSIBLE_DIR) "$$role_lib"); \
-			cd $(ANSIBLE_DIR) && uv run --active ansible-doc -M "$$rel" "$$name" > "../docs/ansible-modules/$$name.txt"; \
+			cd $(ANSIBLE_DIR) && uv run ansible-doc -M "$$rel" "$$name" > "../docs/ansible-modules/$$name.txt"; \
 			cd ..; \
 		done; \
 	done; } $(L)
@@ -375,7 +379,7 @@ ansible-doc: ## Generate documentation for all custom Ansible modules into docs/
 
 .PHONY: linode-login
 linode-login: ## Authenticate the Linode CLI via browser (writes to ~/.config/linode-cli)
-	cd $(SCRIPTS_DIR) && uv run --active linode-cli configure
+	cd $(SCRIPTS_DIR) && uv run linode-cli configure
 
 ## Packer — image builds
 
@@ -426,12 +430,17 @@ dev-secrets: ## Generate dev Grafana admin + renderer credentials (secrets/dev-g
 	  fi; } $(L)
 
 .PHONY: dev-backup-secrets
-dev-backup-secrets: ## Generate secrets/dev-backup.env with a random GPG passphrase and S3 credential placeholders
+dev-backup-secrets: ## Generate secrets/dev-backup.env with GPG passphrase, S3 placeholders, and Discord notification URL
 	@mkdir -p $(SECRETS_DIR)
 	@{ if [ -f $(SECRETS_DIR)/dev-backup.env ]; then \
 	    echo "$(SECRETS_DIR)/dev-backup.env already exists — delete it to regenerate."; \
 	  else \
 	    passphrase=$$(openssl rand -hex 32); \
+	    notification_url=""; \
+	    if [ -n "$(BACKUP_DISCORD_WEBHOOK_URL)" ]; then \
+	      notification_url=$$(printf '%s' "$(BACKUP_DISCORD_WEBHOOK_URL)" \
+	        | sed -E 's|https://[^/]+/api/webhooks/([^/]+)/(.+)|discord://\2@\1|'); \
+	    fi; \
 	    { printf '# S3-compatible object storage credentials for offen/docker-volume-backup.\n'; \
 	      printf '# Supports AWS S3, Cloudflare R2, Backblaze B2, MinIO, etc.\n'; \
 	      printf '# Fill in the S3 values below, then run: make dev-up\n'; \
@@ -450,15 +459,27 @@ dev-backup-secrets: ## Generate secrets/dev-backup.env with a random GPG passphr
 	      printf '# Backups are encrypted with this key before upload. Keep it safe:\n'; \
 	      printf '# losing it makes existing backups unrecoverable.\n'; \
 	      printf 'GPG_PASSPHRASE=%s\n' "$$passphrase"; \
+	      printf '#\n'; \
+	      printf '# Discord notifications via shoutrrr (discord://TOKEN@ID format).\n'; \
+	      printf '# Derived from BACKUP_DISCORD_WEBHOOK_URL at generation time.\n'; \
+	      printf '# To use a different webhook: delete this file and re-run:\n'; \
+	      printf '#   make dev-backup-secrets BACKUP_DISCORD_WEBHOOK_URL=<webhook-url>\n'; \
+	      printf 'NOTIFICATION_LEVEL=info\n'; \
+	      printf 'NOTIFICATION_URLS=%s\n' "$$notification_url"; \
 	    } > $(SECRETS_DIR)/dev-backup.env; \
 	    chmod 600 $(SECRETS_DIR)/dev-backup.env; \
 	    echo "Generated $(SECRETS_DIR)/dev-backup.env"; \
+	    if [ -n "$$notification_url" ]; then \
+	      echo "  Discord notifications: $$notification_url"; \
+	    else \
+	      echo "  No BACKUP_DISCORD_WEBHOOK_URL set — NOTIFICATION_URLS left empty."; \
+	    fi; \
 	    echo "  GPG passphrase written — fill in S3 credentials before running make dev-up"; \
 	  fi; }
 
 .PHONY: dev-backup
-dev-backup: ## Trigger an ad-hoc backup of all dev volumes to S3 (Prometheus TSDB snapshot taken first via exec-pre hook)
-	docker exec dev-backup backup
+dev-backup: ## Trigger an ad-hoc backup of all dev volumes to S3; execs into the running daemon or starts a one-off instant container
+	docker compose -f $(DEV_DIR)/docker-compose.yml --profile instant run --rm --no-deps backup-instant;
 
 .PHONY: dev-restore
 dev-restore: ## Restore dev volumes from S3 (latest backup). Pass FILE=<name> to restore a specific backup.
@@ -494,24 +515,22 @@ prometheus-validate: ## Validate prometheus config with promtool $(PROMETHEUS_VE
 			/etc/prometheus/prometheus.yaml; } $(L)
 
 .PHONY: dev-up
-dev-up: dev-volumes ## Start the local LGTM development stack (Grafana on :3000, anonymous admin)
+dev-up: dev-volumes ## Start the local LGTM development stack (Grafana on :3000, anonymous admin) with scheduled backup daemon
 	@mkdir -p $(LOG_DIR)
-	@{ docker compose -f $(DEV_DIR)/docker-compose.yml up -d --wait ; } $(L)
+	@{ docker compose -f $(DEV_DIR)/docker-compose.yml --profile scheduled up -d --wait ; } $(L)
 
 .PHONY: dev-down
 dev-down: ## Stop and remove the local LGTM development stack
 	@mkdir -p $(LOG_DIR)
-	@{ docker compose -f $(DEV_DIR)/docker-compose.yml down; } $(L)
+	@{ docker compose -f $(DEV_DIR)/docker-compose.yml --profile scheduled down; } $(L)
 
 .PHONY: dev-logs
 dev-logs: ## Tail logs from all development stack services
-	docker compose -f $(DEV_DIR)/docker-compose.yml logs -f
+	docker compose -f $(DEV_DIR)/docker-compose.yml --profile scheduled logs -f
 
-# 10.10.10.1/32
-# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINigPbjmFlc9mo5BKilyy+spKcvXRLJLRidEcBLIX4Vp aidanhall34
 ## Documentation
 
 .PHONY: readme
 readme: ## Regenerate README.md from README.md.tpl and Makefile comments
 	@mkdir -p $(LOG_DIR)
-	@{ uv run --active --python 3.13 $(SCRIPTS_DIR)/generate-readme.py; } $(L)
+	@{ uv run --python 3.13 $(SCRIPTS_DIR)/generate-readme.py; } $(L)

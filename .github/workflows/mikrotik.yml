@@ -10,7 +10,7 @@ jobs:
   configure:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Setup GitHub CLI
         uses: ./.github/actions/setup-gh
@@ -28,7 +28,8 @@ jobs:
         run: make GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} setup
 
       - name: Install Ansible collections
-        run: cd ansible && uv run --active ansible-galaxy collection install -r requirements.yml -p .collections
+        run: cd ansible && uv run --active ansible-galaxy collection install -r
+          requirements.yml -p .collections
 
       - name: Configure MikroTik WireGuard
         env:
@@ -48,7 +49,7 @@ jobs:
             -e mikrotik_wg_gateway_endpoint="$MIKROTIK_WG_GATEWAY_ENDPOINT"
 
       - name: Notify Discord
-        if: always()
+        if: failure()
         uses: ./.github/actions/notify-discord
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}

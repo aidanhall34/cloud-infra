@@ -1,0 +1,13 @@
+name: setup-gh
+
+on:
+  workflow_call:
+    description: "Reusable workflow to ensure GitHub CLI (gh) is installed."
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup GitHub CLI
+        uses: ./.github/actions/setup-gh
