@@ -86,7 +86,7 @@ services:
       docker-volume-backup.archive-pre: >-
         curl -sf -XPOST http://localhost:9090/api/v1/admin/tsdb/snapshot &&
         curl -sf -XPOST http://localhost:3100/flush &&
-        curl -sf -XPOST http://localhost:3200/flush
+        curl -sf -XPOST http://localhost:3200/flush && sleep 5
     healthcheck:
       # Polls every bundled service on its own health/ready endpoint.
       # All six must return HTTP 2xx for the container to be considered healthy.

@@ -11,7 +11,7 @@ jobs:
     env:
       VIRTUAL_ENV: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Setup GitHub CLI
         uses: ./.github/actions/setup-gh
@@ -29,10 +29,10 @@ jobs:
         run: make setup
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
 
       - name: Setup Packer
-        uses: hashicorp/setup-packer@v3
+        uses: hashicorp/setup-packer@v3.2.0
 
       - name: Packer init
         run: make packer-init
@@ -43,7 +43,7 @@ jobs:
         run: make lint
 
       - name: Notify Discord
-        if: always()
+        if: failure()()
         uses: ./.github/actions/notify-discord
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
