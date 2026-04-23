@@ -44,7 +44,7 @@ jobs:
             -F client_payload[branch]="${{ github.ref_name }}"
 
       - name: Notify Discord
-        if: failure()()
+        if: failure()
         uses: ./.github/actions/notify-discord
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}

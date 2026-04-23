@@ -43,7 +43,7 @@ jobs:
         run: make lint
 
       - name: Notify Discord
-        if: failure()()
+        if: failure()
         uses: ./.github/actions/notify-discord
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
